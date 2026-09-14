@@ -1,0 +1,39 @@
+# Local upstream checkouts are intentionally not vendored into the integration repo.
+/ARK/
+/AgentLaboratory-main/
+/data-to-paper-main/
+/rac_main/
+/ResearchClawBench-main/
+/upstreams/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
+
+# Python and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Experiment outputs
+runs/
+workspaces/
+results/
+prepared_tasks/
+*.log
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+COPY --from=benchmark . /opt/benchmark
+COPY pyproject.toml README.md LICENSE /opt/integration/
+COPY src /opt/integration/src
+
+RUN python -m pip install --no-cache-dir -r /opt/benchmark/evaluation/requirements.txt \
+    && python -m pip install --no-cache-dir -e /opt/integration
+
+WORKDIR /opt/integration
+ENTRYPOINT ["rac-ai-scientist"]
+CMD ["--help"]

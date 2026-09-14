@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rac-ai-scientist"
+version = "0.1.0a0"
+description = "Matched-budget RAC experiments across AI-scientist host systems"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = []
+
+[project.scripts]
+rac-ai-scientist = "rac_ai_scientist.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

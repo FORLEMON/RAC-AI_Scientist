@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "host_id": "data_to_paper",
+  "native_entrypoint": "data-to-paper-run-with-console",
+  "capabilities": [
+    {"capability_id": "data_exploration", "description": "Describe and explore supplied data", "tags": ["analysis", "code"], "readable_artifacts": ["task.json", "data/**"], "writable_artifacts": ["state/**", "code/**", "outputs/**"], "produces": ["code", "result"], "native_successors": ["research_goal"]},
+    {"capability_id": "research_goal", "description": "Develop and review the research goal", "tags": ["planning"], "readable_artifacts": ["task.json", "outputs/**"], "writable_artifacts": ["state/**", "outputs/**"], "produces": ["plan"], "native_successors": ["literature_review_goal"]},
+    {"capability_id": "literature_review_goal", "description": "Search literature and assess novelty", "tags": ["literature", "planning"], "readable_artifacts": ["related_work/**", "state/**"], "writable_artifacts": ["state/**", "outputs/**"], "produces": ["literature", "plan"], "native_successors": ["hypothesis_plan"]},
+    {"capability_id": "hypothesis_plan", "description": "Prepare a hypothesis testing plan", "tags": ["planning", "experiment"], "readable_artifacts": ["state/**", "data/**"], "writable_artifacts": ["state/**", "outputs/**"], "produces": ["plan"], "native_successors": ["data_analysis"]},
+    {"capability_id": "data_analysis", "description": "Generate, check, and debug analysis code", "tags": ["experiment", "analysis", "code", "debug"], "readable_artifacts": ["data/**", "state/**"], "writable_artifacts": ["state/**", "code/**", "outputs/**"], "produces": ["code", "result"], "native_successors": ["tables_figures"]},
+    {"capability_id": "tables_figures", "description": "Create checked tables and figures", "tags": ["figure", "code", "analysis"], "readable_artifacts": ["outputs/**", "code/**"], "writable_artifacts": ["state/**", "report/images/**", "outputs/**"], "produces": ["figure", "result"], "native_successors": ["paper_writing"]},
+    {"capability_id": "paper_writing", "description": "Write cited paper sections", "tags": ["writing", "literature", "finalize"], "readable_artifacts": ["state/**", "outputs/**", "related_work/**"], "writable_artifacts": ["state/**", "report/**", "outputs/**"], "produces": ["terminal_report"], "native_successors": ["compile"]},
+    {"capability_id": "compile", "description": "Assemble and compile the terminal paper", "tags": ["finalize", "terminal_review"], "readable_artifacts": ["report/**"], "writable_artifacts": ["state/**", "report/**", "outputs/**"], "produces": ["terminal_report"], "native_successors": []}
+  ]
+}

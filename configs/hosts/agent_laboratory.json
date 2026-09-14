@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "host_id": "agent_laboratory",
+  "native_entrypoint": "python ai_lab_repo.py --yaml-location <config>",
+  "capabilities": [
+    {"capability_id": "literature_review", "description": "Professor and PhD literature review", "tags": ["literature", "planning"], "readable_artifacts": ["task.json", "related_work/**"], "writable_artifacts": ["state/**"], "produces": ["literature", "plan"], "native_successors": ["plan_formulation"]},
+    {"capability_id": "plan_formulation", "description": "Formulate and review an experiment plan", "tags": ["planning", "experiment"], "readable_artifacts": ["state/**", "data/**"], "writable_artifacts": ["state/**"], "produces": ["plan"], "native_successors": ["data_preparation"]},
+    {"capability_id": "data_preparation", "description": "Prepare analysis data and code", "tags": ["code", "analysis"], "readable_artifacts": ["data/**", "state/plan.*"], "writable_artifacts": ["code/**", "outputs/**"], "produces": ["code", "result"], "native_successors": ["running_experiments"]},
+    {"capability_id": "running_experiments", "description": "Execute the planned experiments", "tags": ["experiment", "analysis", "debug"], "readable_artifacts": ["data/**", "code/**", "state/plan.*"], "writable_artifacts": ["code/**", "outputs/**"], "produces": ["code", "result"], "native_successors": ["results_interpretation"]},
+    {"capability_id": "results_interpretation", "description": "Interpret persisted experimental results", "tags": ["analysis", "writing"], "readable_artifacts": ["outputs/**", "state/**"], "writable_artifacts": ["state/**"], "produces": ["analysis"], "native_successors": ["report_writing"]},
+    {"capability_id": "report_writing", "description": "Write the scientific report", "tags": ["writing", "literature", "finalize"], "readable_artifacts": ["state/**", "outputs/**", "related_work/**"], "writable_artifacts": ["report/**"], "produces": ["terminal_report"], "native_successors": ["report_refinement"]},
+    {"capability_id": "report_refinement", "description": "Review and refine the report", "tags": ["terminal_review", "writing"], "readable_artifacts": ["report/**", "outputs/**"], "writable_artifacts": ["report/**", "state/**"], "produces": ["review", "terminal_report"], "native_successors": ["plan_formulation", "report_writing"]}
+  ]
+}

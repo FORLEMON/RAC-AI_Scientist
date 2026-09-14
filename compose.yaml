@@ -1,0 +1,45 @@
+services:
+  ark:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ark
+      additional_contexts:
+        host: ${ARK_CONTEXT:-./upstreams/ark}
+    environment: &agent_environment
+      AGENT_API_BASE: ${AGENT_API_BASE:-}
+      AGENT_API_KEY: ${AGENT_API_KEY:-}
+      AGENT_MODEL_NAME: ${AGENT_MODEL_NAME:-}
+    volumes: &run_volumes
+      - ${RUN_ROOT:-./runs}:/runs
+      - ${PREPARED_TASK:-./benchmark_input}:/input/task:ro
+
+  agent-laboratory:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.agent-laboratory
+      additional_contexts:
+        host: ${AGENT_LABORATORY_CONTEXT:-./upstreams/agent_laboratory}
+    environment: *agent_environment
+    volumes: *run_volumes
+
+  data-to-paper:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.data-to-paper
+      additional_contexts:
+        host: ${DATA_TO_PAPER_CONTEXT:-./upstreams/data_to_paper}
+    environment: *agent_environment
+    volumes: *run_volumes
+
+  scorer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.scorer
+      additional_contexts:
+        benchmark: ${RCB_CONTEXT:-./upstreams/researchclawbench}
+    environment:
+      JUDGE_API_BASE: ${JUDGE_API_BASE:-}
+      JUDGE_API_KEY: ${JUDGE_API_KEY:-}
+      JUDGE_MODEL_NAME: ${JUDGE_MODEL_NAME:-}
+    volumes:
+      - ${RUN_ROOT:-./runs}:/runs

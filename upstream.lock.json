@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "upstreams": {
+    "rac": {
+      "url": "https://github.com/Aicoo-Team/runtime-agent-coordination.git",
+      "revision": null,
+      "required_for_live": false,
+      "local_snapshot": "rac_main",
+      "tree_sha256": "f3dab822c5d9cc26d82d6dd7c161a1df2b9e8755162bcf181169005242adb51a",
+      "license": "MIT",
+      "note": "The URL is recorded by the upstream HANDOFF.md but is not currently public."
+    },
+    "ark": {
+      "url": "https://github.com/FORLEMON/ARK-sharednet.git",
+      "revision": "1e14a34eaf71d30524c470669cb0b29f4731f486",
+      "required_for_live": true,
+      "local_snapshot": "ARK",
+      "tree_sha256": "f38fd735a45f7b484c5fdad12b48fe2b148ac2b55cac64a545307c85ee8a14bd",
+      "license": "Apache-2.0"
+    },
+    "agent_laboratory": {
+      "url": "https://github.com/SamuelSchmidgall/AgentLaboratory.git",
+      "revision": "d9017d90e329112d2a80b7712f37ee9094d2cd27",
+      "required_for_live": true,
+      "local_snapshot": "AgentLaboratory-main",
+      "tree_sha256": "a59e23a5a218f66d8ddb53cdaf40e3faa92592beebfc2881eaf7cf5bcecff73e",
+      "license": "MIT"
+    },
+    "data_to_paper": {
+      "url": "https://github.com/Technion-Kishony-lab/data-to-paper.git",
+      "revision": "81df14c4b9600466e645c3b2b336cc54daa3df3a",
+      "required_for_live": true,
+      "version_observed": "1.1.22",
+      "local_snapshot": "data-to-paper-main",
+      "tree_sha256": "16922fb5121701361f0ca2de87efe5003938fcaa6c3e2b1df760fa010d1cd0af",
+      "license": "MIT"
+    },
+    "researchclawbench": {
+      "url": "https://github.com/InternScience/ResearchClawBench.git",
+      "revision": "ed664513287a1fc60ae319e6bf7dbe7a62144135",
+      "required_for_live": true,
+      "local_snapshot": "ResearchClawBench-main",
+      "tree_sha256": "3023824291710c4698818586fd15d985a69072730267d9726e71ef531e8f8e13",
+      "license": "MIT"
+    }
+  }
+}
