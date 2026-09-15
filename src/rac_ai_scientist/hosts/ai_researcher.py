@@ -103,6 +103,7 @@ class AIResearcherBridge(HostBridge):
         file_env.local_workplace = str(self.workspace)
         file_env.docker_workplace = str(self.workspace)
         self.client = MetaChain(log_path=str(native / "metachain.log"))
+        self._install_tool_argument_adapter(self.client)
         self.agents = {
             "idea": get_idea_agent(self.model, file_env=file_env),
             "survey": get_survey_agent(self.model, file_env=file_env, code_env=code_env),
@@ -150,7 +151,7 @@ class AIResearcherBridge(HostBridge):
         complete = error is None and report.is_file() and bool(report.read_text(encoding="utf-8", errors="replace").strip())
         self.terminal = True
         return NativeRunResult(
-            status="completed" if complete else "stop",
+            status="failed" if error else ("completed" if complete else "stop"),
             reason="AI-Researcher native Level-1 sequence completed" if complete else (error or "AI-Researcher returned without a report"),
             native_iterations=iterations,
             artifacts_before=before,
@@ -164,7 +165,7 @@ class AIResearcherBridge(HostBridge):
                 cost_source=self.usage.cost_source,
                 token_source=self.usage.token_source,
             ),
-            native_status="completed" if complete else "stopped",
+            native_status="failed" if error else ("completed" if complete else "stopped"),
         )
 
     def checkpoint(self) -> Checkpoint:
@@ -203,6 +204,10 @@ class AIResearcherBridge(HostBridge):
                 [{"role": "user", "content": prompt}], context_variables=self.context,
                 model_override=self.model, debug=False, max_turns=max(2, self.initial_budget.agent_calls - self.usage.agent_calls)))
             self.context.update(response.context_variables)
+            provider_errors = [item.get("content", "") for item in response.messages
+                               if isinstance(item, dict) and item.get("role") == "error"]
+            if provider_errors:
+                raise RuntimeError("; ".join(provider_errors))
             output = "\n".join(str(item.get("content", "")) for item in response.messages if isinstance(item, dict))
             self._persist(capability_id, output)
             self.completed.add(capability_id)
@@ -225,6 +230,40 @@ class AIResearcherBridge(HostBridge):
             wall_seconds=time.monotonic() - started,
             cost_source="provider_response" if self.usage.cost_source == "provider_response" else "unavailable",
             token_source="provider_response"), error=error, proposed_done=proposed_done, metrics=metrics)
+
+    @staticmethod
+    def _install_tool_argument_adapter(client) -> None:
+        """Keep malformed external tool arguments out of native logging/execution."""
+        def validate(raw):
+            parsed = json.loads(raw)
+            if not isinstance(parsed, dict):
+                raise ValueError("tool arguments must be a JSON object")
+
+        original_format = client.logger._warp_args
+        def format_arguments(raw):
+            try:
+                validate(raw)
+            except (ValueError, TypeError):
+                return "<invalid JSON object; tool execution rejected>"
+            return original_format(raw)
+        client.logger._warp_args = format_arguments
+
+        original_handle = client.handle_tool_calls
+        def handle_tool_calls(tool_calls, *args, **kwargs):
+            valid, errors = [], []
+            for call in tool_calls:
+                try:
+                    validate(call.function.arguments)
+                except (ValueError, TypeError):
+                    errors.append({"role": "tool", "tool_call_id": call.id,
+                        "name": call.function.name,
+                        "content": "[Tool Call Error] Arguments must be a valid JSON object. Resend this tool call with corrected arguments."})
+                else:
+                    valid.append(call)
+            response = original_handle(valid, *args, **kwargs)
+            response.messages.extend(errors)
+            return response
+        client.handle_tool_calls = handle_tool_calls
 
     def _install_usage_adapter(self) -> None:
         import research_agent.inno.core as core
