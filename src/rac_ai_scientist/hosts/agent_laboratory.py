@@ -74,29 +74,26 @@ def _install_arxiv_transport() -> None:
         ArxivSearch.find_papers_by_str = find_papers_by_str
 
 
-def _install_hf_data_search() -> None:
-    """Do not load the remote dataset catalog before a SEARCH_HF command."""
+def _install_hf_data_search(workspace: Path) -> None:
+    """Return the supplied benchmark inputs instead of searching external datasets."""
     import ai_lab_repo
 
-    original = ai_lab_repo.HFDataSearch
-    if getattr(original, "_rac_lazy", False):
-        return
+    data = workspace / "data"
+    paths = sorted(path.relative_to(workspace).as_posix() for path in data.iterdir()) if data.is_dir() else []
+    notice = (
+        "External Hugging Face dataset search is disabled for this benchmark. "
+        "Read task.json and use only the supplied local data paths: "
+        + ", ".join(repr(path) for path in paths)
+    )
 
-    class LazyHFDataSearch:
-        _rac_lazy = True
-
-        def __init__(self):
-            self.engine = None
-
+    class SuppliedDataSearch:
         def retrieve_ds(self, query):
-            if self.engine is None:
-                self.engine = original()
-            return self.engine.retrieve_ds(query)
+            return []
 
         def results_str(self, datasets):
-            return self.engine.results_str(datasets)
+            return [notice]
 
-    ai_lab_repo.HFDataSearch = LazyHFDataSearch
+    ai_lab_repo.HFDataSearch = SuppliedDataSearch
 
 
 class AgentLaboratoryBridge(HostBridge):
@@ -147,7 +144,7 @@ class AgentLaboratoryBridge(HostBridge):
             from ai_lab_repo import LaboratoryWorkflow
 
             _install_arxiv_transport()
-            _install_hf_data_search()
+            _install_hf_data_search(self.workspace)
             self._install_model_adapter()
 
             models = {native: self.model for native in NATIVE_NAMES.values()}
