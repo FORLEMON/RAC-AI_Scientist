@@ -65,6 +65,8 @@ class EpisodeRunner:
             pending = self.policy.evaluate(checkpoint, decision, result)
             self.ledger.append({"type": "evaluation", "hop": hop, "payload": pending})
             if pending.action is Action.STOP:
+                if result.error and "Error code: 402" in result.error:
+                    return EpisodeOutcome("budget_exhausted", hop + 1, pending.reason)
                 if result.error or result.timed_out:
                     return EpisodeOutcome("timed_out" if result.timed_out else "failed", hop + 1, pending.reason)
                 return EpisodeOutcome("completed", hop + 1, pending.reason)

@@ -64,6 +64,8 @@ class SharedPolicy:
         decision: CoordinationDecision,
         result: InvocationResult,
     ) -> CoordinationDecision:
+        if result.error and "Error code: 402" in result.error:
+            return CoordinationDecision(Action.STOP, None, "model transport rejected further requests (HTTP 402)", decision.contract)
         if not self.condition.enables("verifier"):
             if result.error or result.timed_out:
                 return CoordinationDecision(Action.STOP, None, result.error or "capability timed out")
