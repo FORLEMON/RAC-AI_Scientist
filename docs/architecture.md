@@ -2,7 +2,7 @@
 
 ## One policy, six host interfaces
 
-The common runner owns the episode loop. At each hop it requests a normalized
+For R1--R5, the common runner owns the episode loop. At each hop it requests a normalized
 checkpoint from the host bridge. The checkpoint contains the objective, native
 stage, persisted artifact manifest, unresolved issues, remaining budget, and
 capability cards. The selected condition determines which common mechanisms may
@@ -12,7 +12,8 @@ run.
 ResearchClawBench task workspace
               |
               v
-      common episode runner  -----> append-only usage/decision ledger
+      N0 host scheduler OR R1--R5 common runner
+                         -----> append-only usage/decision ledger
               |
       shared N0--R5 policy
               |
@@ -35,8 +36,16 @@ classify issues for routing, or decide when the episode stops.
 
 ## Condition boundary
 
-- **N0** delegates transition choice to `HostBridge.native_next` and records the
-  same normalized trace without changing the host workflow.
+- **N0** uses the host's complete native scheduler without passing phase
+  transitions through the shared RAC policy. ARK, Agent Laboratory,
+  data-to-paper, AutoResearchClaw, and EvoScientist enter their top-level native
+  lifecycle once. For ARK this is one `Orchestrator.run()` lifecycle with native
+  caps of three development iterations and three paper-review iterations.
+  AI-Researcher's cross-benchmark compatibility path preserves its MetaChain
+  agent stack and fixed Level-1 ordering because its published launcher cannot
+  consume a generic ResearchClawBench task or run outside its nested benchmark
+  Docker layout. The integration layer records only the native run boundary,
+  artifacts, usage, and terminal state.
 - **R1** selects from admitted capability cards using the shared policy.
 - **R2** additionally supplies a minimum-scoped contract derived from the chosen
   card and checkpoint.

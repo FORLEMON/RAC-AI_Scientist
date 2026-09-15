@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -13,10 +14,12 @@ from ..bridge import HostBridge
 from ..issues import extract_review_issues, parse_review_score
 from ..manifest import capability_cards, load_host_manifest
 from ..reproducibility import seed_runtime
-from ..schemas import Budget, Checkpoint, InvocationResult, Issue, Usage, WorkContract
+from ..schemas import Budget, Checkpoint, InvocationResult, Issue, NativeRunResult, Usage, WorkContract
 
 
 ORDER = ("researcher", "experimenter", "writer", "reviewer", "planner")
+NATIVE_DEV_ITERATIONS = 3
+NATIVE_REVIEW_ITERATIONS = 3
 REQUIRED_TAGS = {
     "researcher": ("planning",),
     "experimenter": ("experiment",),
@@ -27,7 +30,7 @@ REQUIRED_TAGS = {
 
 
 class ArkBridge(HostBridge):
-    """Thin adapter over ARK's existing Orchestrator.run_agent capability."""
+    """ARK adapter with a host-owned N0 path and capability-level RAC path."""
 
     host_id = "ark"
 
@@ -46,14 +49,24 @@ class ArkBridge(HostBridge):
         self.native_capability = ORDER[0]
         self.started = 0.0
         self.open_issues: list[Issue] = []
+        self.native_mode = False
 
     def initialize(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
+        self._initialize(episode_id=episode_id, workspace=workspace, objective=objective, seed=seed, native=False)
+
+    def initialize_native(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
+        self._initialize(episode_id=episode_id, workspace=workspace, objective=objective, seed=seed, native=True)
+
+    def _initialize(self, *, episode_id: str, workspace: Path, objective: str, seed: int, native: bool) -> None:
         if not (self.upstream / "ark" / "orchestrator").is_dir():
             raise FileNotFoundError(f"ARK checkout not found: {self.upstream}")
         self.workspace = workspace.resolve()
+        self.episode_id = episode_id
+        self.objective = objective
+        self.native_mode = native
         seed_runtime(seed)
         self.workspace.mkdir(parents=True, exist_ok=True)
-        project = self.workspace / ".rac" / "ark_project"
+        project = self.workspace / (Path(".ark") / "native_project" if native else Path(".rac") / "ark_project")
         agents = project / "agents"
         agents.mkdir(parents=True, exist_ok=True)
         templates = self.upstream / "ark" / "templates" / "agents"
@@ -71,23 +84,29 @@ class ArkBridge(HostBridge):
             for old, new in replacements.items():
                 content = content.replace(old, new)
             (agents / source.name).write_text(content, encoding="utf-8")
-        (project / "hooks.py").write_text("# RAC benchmark bridge: no project-specific hooks.\n", encoding="utf-8")
-        (project / "config.yaml").write_text(self._config_text(), encoding="utf-8")
+        hook_comment = (
+            "# ResearchClawBench native ARK run: no project-specific hooks.\n"
+            if native
+            else "# RAC benchmark bridge: no project-specific hooks.\n"
+        )
+        (project / "hooks.py").write_text(hook_comment, encoding="utf-8")
+        (project / "config.yaml").write_text(self._config_text(native=native), encoding="utf-8")
         report = self.workspace / "report"
         report.mkdir(exist_ok=True)
         (report / "images").mkdir(exist_ok=True)
-        main = report / "main.tex"
-        if not main.exists():
-            main.write_text(
-                "\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n"
-                "\\section*{Research report}\nWork in progress.\n\\end{document}\n",
-                encoding="utf-8",
-            )
-        (report / "references.bib").touch(exist_ok=True)
-        state = self.workspace / "auto_research" / "state"
-        state.mkdir(parents=True, exist_ok=True)
-        (state / "idea.md").write_text(objective, encoding="utf-8")
-        (state / "project_context.md").write_text(self._context_text(), encoding="utf-8")
+        if not native:
+            main = report / "main.tex"
+            if not main.exists():
+                main.write_text(
+                    "\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n"
+                    "\\section*{Research report}\nWork in progress.\n\\end{document}\n",
+                    encoding="utf-8",
+                )
+            (report / "references.bib").touch(exist_ok=True)
+            state = self.workspace / "auto_research" / "state"
+            state.mkdir(parents=True, exist_ok=True)
+            (state / "idea.md").write_text(objective, encoding="utf-8")
+            (state / "project_context.md").write_text(self._context_text(), encoding="utf-8")
         os.environ.setdefault("OPENAI_API_KEY", self.api_key)
         if os.environ.get("AGENT_API_BASE"):
             os.environ.setdefault("OPENAI_API_BASE", os.environ["AGENT_API_BASE"])
@@ -98,16 +117,65 @@ class ArkBridge(HostBridge):
         self.orchestrator = Orchestrator(
             project=episode_id,
             max_days=max(self.initial_budget.wall_seconds / 86400.0, 0.001),
-            max_iterations=max(1, self.initial_budget.hops),
+            max_iterations=NATIVE_REVIEW_ITERATIONS if native else max(1, self.initial_budget.hops),
             model=self.model,
             code_dir=str(self.workspace),
             project_dir=str(project),
             mode="paper",
         )
-        self.episode_id = episode_id
-        self.objective = objective
         self.started = time.monotonic()
-        self.open_issues = [Issue("native:researcher", "native_requirement", "initial research framing is incomplete", required_tags=("planning",))]
+        self.open_issues = [] if native else [Issue("native:researcher", "native_requirement", "initial research framing is incomplete", required_tags=("planning",))]
+
+    def run_native(self) -> NativeRunResult:
+        """Run ARK's complete scheduler once; RAC makes no phase decisions."""
+        self._require_initialized()
+        if not self.native_mode:
+            raise RuntimeError("initialize_native must be used before run_native")
+        assert self.workspace is not None
+        before = snapshot_workspace(self.workspace)
+        usage_before = self._usage_totals()
+        started = time.monotonic()
+
+        self.orchestrator.run()
+        self._normalize_report()
+
+        after = snapshot_workspace(self.workspace)
+        usage_after = self._usage_totals()
+        paper_state = self.orchestrator.load_paper_state()
+        native_status = str(paper_state.get("status", "unknown"))
+        iterations = int(getattr(self.orchestrator, "iteration", 0) or 0)
+        review_score = float(paper_state.get("current_score", 0) or 0)
+        stopped = bool(getattr(self.orchestrator, "_stop_requested", False))
+        if native_status == "accepted":
+            status = "completed"
+            reason = "ARK native acceptance threshold reached"
+        elif stopped:
+            status = "stop"
+            reason = "ARK native stop was requested"
+        elif iterations >= NATIVE_REVIEW_ITERATIONS:
+            status = "stop"
+            reason = "ARK native review-iteration limit reached"
+        else:
+            status = "stop"
+            reason = f"ARK native workflow returned with paper status {native_status}"
+        return NativeRunResult(
+            status=status,
+            reason=reason,
+            native_iterations=iterations,
+            artifacts_before=before,
+            artifacts_after=after,
+            usage=Usage(
+                provider_cost_usd=usage_after.provider_cost_usd - usage_before.provider_cost_usd,
+                input_tokens=usage_after.input_tokens - usage_before.input_tokens,
+                output_tokens=usage_after.output_tokens - usage_before.output_tokens,
+                agent_calls=usage_after.agent_calls - usage_before.agent_calls,
+                wall_seconds=time.monotonic() - started,
+                cost_source=usage_after.cost_source,
+                token_source=usage_after.token_source,
+            ),
+            native_status=native_status,
+            metrics={"review_score": review_score},
+        )
 
     def checkpoint(self) -> Checkpoint:
         self._require_initialized()
@@ -243,10 +311,10 @@ class ArkBridge(HostBridge):
         elapsed = time.monotonic() - self.started
         return max(1, int(min(1800, self.initial_budget.wall_seconds - elapsed)))
 
-    def _config_text(self) -> str:
+    def _config_text(self, *, native: bool = False) -> str:
         provider = self.model.split("/", 1)[0].upper() if "/" in self.model else "OPENAI"
         key_name = provider.lower() + "_api_key"
-        return (
+        config = (
             f"model: {self.model}\n"
             f"bot_model: {self.model}\n"
             f"{key_name}: \"\"\n"
@@ -257,6 +325,13 @@ class ArkBridge(HostBridge):
             "intervention:\n  enabled: false\n"
             "artifact_store:\n  type: local\n"
         )
+        if native:
+            config += (
+                f"research_idea: {json.dumps(self.objective, ensure_ascii=False)}\n"
+                f"max_dev_iterations: {NATIVE_DEV_ITERATIONS}\n"
+                f"max_iterations: {NATIVE_REVIEW_ITERATIONS}\n"
+            )
+        return config
 
     def _context_text(self) -> str:
         assert self.workspace is not None

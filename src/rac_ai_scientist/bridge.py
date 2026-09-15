@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from .schemas import Checkpoint, InvocationResult, WorkContract
+from .schemas import Checkpoint, InvocationResult, NativeRunResult, WorkContract
 
 
 class HostBridge(ABC):
@@ -14,6 +14,19 @@ class HostBridge(ABC):
     @abstractmethod
     def initialize(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
         """Initialize or resume host-native state in ``workspace``."""
+
+    def initialize_native(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
+        """Initialize a host-owned N0 lifecycle without RAC phase scheduling.
+
+        Hosts that need a distinct native setup may override this method. The
+        default preserves compatibility for hosts whose normal initialization
+        already prepares their complete native workflow.
+        """
+        self.initialize(episode_id=episode_id, workspace=workspace, objective=objective, seed=seed)
+
+    def run_native(self) -> NativeRunResult:
+        """Run the host's complete native scheduler for an N0 episode."""
+        raise NotImplementedError(f"{type(self).__name__} does not expose a native N0 runner")
 
     @abstractmethod
     def checkpoint(self) -> Checkpoint:

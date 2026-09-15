@@ -15,7 +15,7 @@ from ..bridge import HostBridge
 from ..issues import extract_review_issues, parse_review_score
 from ..manifest import capability_cards, load_host_manifest
 from ..reproducibility import seed_runtime
-from ..schemas import Budget, Checkpoint, InvocationResult, Issue, Usage, WorkContract
+from ..schemas import Budget, Checkpoint, InvocationResult, Issue, NativeRunResult, Usage, WorkContract
 from .ark import render_contract_prompt
 
 
@@ -117,6 +117,55 @@ class AIResearcherBridge(HostBridge):
         self.context = {"working_dir": self.workspace.as_posix().lstrip("/"), "notes": [],
                         "innovative_idea": objective, "objective": objective}
         self._install_usage_adapter()
+
+    def initialize_native(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
+        self.initialize(episode_id=episode_id, workspace=workspace, objective=objective, seed=seed)
+
+    def run_native(self) -> NativeRunResult:
+        """Run the fixed Level-1 research sequence without RAC routing decisions.
+
+        AI-Researcher's published Level-1 launcher is tied to its own ML benchmark
+        instance schema and nested Docker environment.  The compatibility layer
+        therefore retains its MetaChain agents and fixed survey -> plan -> build ->
+        analyse -> write order, while mapping the supplied ResearchClawBench
+        workspace into that sequence.
+        """
+        self._require_initialized()
+        assert self.workspace is not None
+        before, usage_before = snapshot_workspace(self.workspace), self.usage
+        started = time.monotonic()
+        idea_path = self.workspace / "state" / "ai_researcher" / "idea.md"
+        idea_path.parent.mkdir(parents=True, exist_ok=True)
+        idea_path.write_text(self.objective, encoding="utf-8")
+        self.completed.add("idea")
+        iterations = 0
+        error: str | None = None
+        for capability_id in ("survey", "implementation_plan", "implementation", "experiment_analysis", "paper_writing"):
+            result = self.invoke(capability_id, None)
+            iterations += 1
+            if result.error:
+                error = result.error
+                break
+        report = self.workspace / "report" / "report.md"
+        complete = error is None and report.is_file() and bool(report.read_text(encoding="utf-8", errors="replace").strip())
+        self.terminal = True
+        return NativeRunResult(
+            status="completed" if complete else "stop",
+            reason="AI-Researcher native Level-1 sequence completed" if complete else (error or "AI-Researcher returned without a report"),
+            native_iterations=iterations,
+            artifacts_before=before,
+            artifacts_after=snapshot_workspace(self.workspace),
+            usage=Usage(
+                provider_cost_usd=self.usage.provider_cost_usd - usage_before.provider_cost_usd,
+                input_tokens=self.usage.input_tokens - usage_before.input_tokens,
+                output_tokens=self.usage.output_tokens - usage_before.output_tokens,
+                agent_calls=self.usage.agent_calls - usage_before.agent_calls,
+                wall_seconds=time.monotonic() - started,
+                cost_source=self.usage.cost_source,
+                token_source=self.usage.token_source,
+            ),
+            native_status="completed" if complete else "stopped",
+        )
 
     def checkpoint(self) -> Checkpoint:
         self._require_initialized()

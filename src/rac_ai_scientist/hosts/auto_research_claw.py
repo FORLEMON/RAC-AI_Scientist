@@ -14,7 +14,7 @@ from ..bridge import HostBridge
 from ..issues import extract_review_issues, parse_review_score
 from ..manifest import capability_cards, load_host_manifest
 from ..reproducibility import seed_runtime
-from ..schemas import Budget, Checkpoint, InvocationResult, Issue, Usage, WorkContract
+from ..schemas import Budget, Checkpoint, InvocationResult, Issue, NativeRunResult, Usage, WorkContract
 
 
 ORDER = ("scope", "literature", "synthesis", "design", "experiment", "analysis", "writing", "finalize")
@@ -91,6 +91,48 @@ class AutoResearchClawBridge(HostBridge):
         self.config = RCConfig.from_dict(data, project_root=self.workspace, check_paths=False)
         self.adapters = AdapterBundle.from_config(self.config)
         self._install_usage_adapter()
+
+    def initialize_native(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
+        self.initialize(episode_id=episode_id, workspace=workspace, objective=objective, seed=seed)
+
+    def run_native(self) -> NativeRunResult:
+        """Run the native full-auto pipeline as one scheduler-owned operation."""
+        self._require_initialized()
+        assert self.workspace is not None and self.run_dir is not None
+        from researchclaw.pipeline.runner import execute_pipeline
+
+        before, usage_before = snapshot_workspace(self.workspace), self.usage
+        started = time.monotonic()
+        results = execute_pipeline(
+            run_dir=self.run_dir,
+            run_id=self.episode_id,
+            config=self.config,
+            adapters=self.adapters,
+            auto_approve_gates=True,
+        )
+        self._normalize_products()
+        report = self.workspace / "report" / "report.md"
+        stages_done = sum(1 for result in results if getattr(result.status, "value", result.status) == "done")
+        complete = bool(results) and stages_done == len(results) and report.is_file()
+        self.terminal = True
+        return NativeRunResult(
+            status="completed" if complete else "stop",
+            reason="AutoResearchClaw native full-auto pipeline completed" if complete else "AutoResearchClaw native pipeline stopped before completion",
+            native_iterations=len(results),
+            artifacts_before=before,
+            artifacts_after=snapshot_workspace(self.workspace),
+            usage=Usage(
+                provider_cost_usd=self.usage.provider_cost_usd - usage_before.provider_cost_usd,
+                input_tokens=self.usage.input_tokens - usage_before.input_tokens,
+                output_tokens=self.usage.output_tokens - usage_before.output_tokens,
+                agent_calls=self.usage.agent_calls - usage_before.agent_calls,
+                wall_seconds=time.monotonic() - started,
+                cost_source=self.usage.cost_source,
+                token_source=self.usage.token_source,
+            ),
+            native_status="completed" if complete else "stopped",
+            metrics={"stages_done": float(stages_done), "stages_returned": float(len(results))},
+        )
 
     def checkpoint(self) -> Checkpoint:
         self._require_initialized()

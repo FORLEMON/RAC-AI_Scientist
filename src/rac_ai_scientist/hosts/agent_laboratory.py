@@ -14,7 +14,7 @@ from ..artifacts import snapshot_workspace
 from ..bridge import HostBridge
 from ..manifest import capability_cards, load_host_manifest
 from ..reproducibility import seed_runtime
-from ..schemas import Budget, Checkpoint, InvocationResult, Issue, Usage, WorkContract
+from ..schemas import Budget, Checkpoint, InvocationResult, Issue, NativeRunResult, Usage, WorkContract
 
 
 PHASES = (
@@ -113,6 +113,48 @@ class AgentLaboratoryBridge(HostBridge):
             self._save()
         finally:
             os.chdir(previous)
+
+    def initialize_native(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
+        """Build the normal LaboratoryWorkflow used by Agent Laboratory itself."""
+        self.initialize(episode_id=episode_id, workspace=workspace, objective=objective, seed=seed)
+
+    def run_native(self) -> NativeRunResult:
+        """Let LaboratoryWorkflow own all phase, retry, and refinement decisions."""
+        self._require_initialized()
+        assert self.workspace is not None
+        before = snapshot_workspace(self.workspace)
+        calls_before, input_before = self.provider_calls, self.input_tokens
+        output_before, cost_before = self.output_tokens, self.provider_cost_usd
+        started = time.monotonic()
+        previous = Path.cwd()
+        try:
+            os.chdir(self.workspace)
+            self.workflow.perform_research()
+            self._persist_products()
+            self._normalize_report()
+            self.terminal = True
+            self._save()
+        finally:
+            os.chdir(previous)
+        report = self.workspace / "report" / "report.md"
+        complete = report.is_file() and bool(report.read_text(encoding="utf-8", errors="replace").strip())
+        return NativeRunResult(
+            status="completed" if complete else "stop",
+            reason="Agent Laboratory native workflow completed" if complete else "Agent Laboratory returned without a report",
+            native_iterations=1,
+            artifacts_before=before,
+            artifacts_after=snapshot_workspace(self.workspace),
+            usage=Usage(
+                provider_cost_usd=self.provider_cost_usd - cost_before,
+                input_tokens=self.input_tokens - input_before,
+                output_tokens=self.output_tokens - output_before,
+                agent_calls=self.provider_calls - calls_before,
+                wall_seconds=time.monotonic() - started,
+                cost_source="provider_response" if self.cost_is_provider_reported else "unavailable",
+                token_source="provider_response",
+            ),
+            native_status="completed" if complete else "missing_report",
+        )
 
     def _benchmark_note(self) -> str:
         assert self.workspace is not None

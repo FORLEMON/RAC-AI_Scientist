@@ -19,6 +19,29 @@ from .provenance import tree_hash
 from .hosts.registry import HOST_IDS, local_snapshot_name, make_bridge
 
 
+def _uses_host_native_n0(host: str, condition: str) -> bool:
+    return host in HOST_IDS and condition == "N0"
+
+
+def _execute_episode(bridge, condition: str, ledger: JsonlLedger, *, hard_hop_limit: int, review_score_threshold: float):
+    """Execute every N0 with its host scheduler; reserve RAC for R1--R5."""
+    if _uses_host_native_n0(bridge.host_id, condition):
+        ledger.append({"type": "native_run_start", "host": bridge.host_id, "condition": condition})
+        native_result = bridge.run_native()
+        ledger.append({"type": "native_run_complete", "host": bridge.host_id, "condition": condition, "payload": native_result})
+        from .runner import EpisodeOutcome
+
+        return EpisodeOutcome(native_result.status, 0, native_result.reason), native_result
+
+    outcome = EpisodeRunner(
+        bridge,
+        condition,
+        ledger,
+        review_score_threshold=review_score_threshold,
+    ).run(hard_hop_limit=hard_hop_limit)
+    return outcome, None
+
+
 def _doctor(args: argparse.Namespace) -> int:
     config_path = Path(args.config).resolve()
     data = load_config(config_path)
@@ -156,6 +179,7 @@ def _run_one(args: argparse.Namespace) -> int:
     materialize_rcb_workspace(task_dir, workspace)
     assert_no_target_study(workspace)
     bridge = make_bridge(args.host, upstream, manifest, budget, model, api_key)
+    host_native_n0 = _uses_host_native_n0(args.host, args.condition)
     run_config = {
         "host": args.host,
         "condition": args.condition,
@@ -164,6 +188,7 @@ def _run_one(args: argparse.Namespace) -> int:
         "model": model,
         "budget": to_jsonable(budget),
         "review_score_threshold": args.review_score_threshold,
+        "execution_mode": "host_native" if host_native_n0 else "rac_episode_runner",
     }
     metadata = {
         "schema_version": 1,
@@ -178,6 +203,7 @@ def _run_one(args: argparse.Namespace) -> int:
         "workspace_input_sha256": config_hash(to_jsonable(snapshot_workspace(workspace))),
         "manifest_sha256": config_hash(json.loads(manifest.read_text(encoding="utf-8"))),
         "status": "initializing",
+        "execution_mode": "host_native" if host_native_n0 else "rac_episode_runner",
     }
     metadata_path = episode_dir / "episode.json"
     lock_path = root / "upstream.lock.json"
@@ -187,7 +213,14 @@ def _run_one(args: argparse.Namespace) -> int:
         spec = lock.get("upstreams", {}).get(args.host, {})
         actual_tree, file_count, byte_count = tree_hash(upstream)
         local_snapshot = root / spec.get("local_snapshot", "")
-        expected_tree = spec.get("snapshot_tree_sha256") if upstream == local_snapshot.resolve() and spec.get("snapshot_tree_sha256") else spec.get("tree_sha256")
+        configured_host_root = os.environ.get("RAC_HOST_ROOT")
+        packaged_host_root = Path(configured_host_root).resolve() if configured_host_root else None
+        if packaged_host_root is not None and upstream == packaged_host_root and spec.get("runtime_tree_sha256"):
+            expected_tree = spec["runtime_tree_sha256"]
+        elif upstream == local_snapshot.resolve() and spec.get("snapshot_tree_sha256"):
+            expected_tree = spec["snapshot_tree_sha256"]
+        else:
+            expected_tree = spec.get("tree_sha256")
         source_mismatch = bool(expected_tree and actual_tree != expected_tree)
         metadata["upstream"] = {
             "revision": spec.get("revision"),
@@ -200,14 +233,30 @@ def _run_one(args: argparse.Namespace) -> int:
     try:
         if source_mismatch:
             raise ValueError(f"{args.host} checkout does not match upstream.lock.json")
-        bridge.initialize(episode_id=episode_id, workspace=workspace, objective=objective, seed=args.seed)
-        outcome = EpisodeRunner(
+        initializer = bridge.initialize_native if host_native_n0 else bridge.initialize
+        initializer(episode_id=episode_id, workspace=workspace, objective=objective, seed=args.seed)
+        outcome, native_result = _execute_episode(
             bridge,
             args.condition,
             JsonlLedger(episode_dir / "coordination.jsonl"),
+            hard_hop_limit=args.max_hops,
             review_score_threshold=args.review_score_threshold,
-        ).run(hard_hop_limit=args.max_hops)
+        )
         metadata.update({"status": outcome.status, "hops": outcome.hops, "reason": outcome.reason})
+        if native_result is not None:
+            metadata["native"] = {
+                "iterations_completed": native_result.native_iterations,
+                "status": native_result.native_status,
+                "usage": to_jsonable(native_result.usage),
+                "metrics": to_jsonable(native_result.metrics),
+            }
+            if args.host == "ark":
+                metadata["native"].update({
+                    "dev_iteration_limit": 3,
+                    "review_iteration_limit": 3,
+                    "review_iterations_completed": native_result.native_iterations,
+                    "paper_status": native_result.native_status,
+                })
     except Exception as exc:
         metadata.update({"status": "failed", "error_type": type(exc).__name__, "reason": str(exc)})
         raise
