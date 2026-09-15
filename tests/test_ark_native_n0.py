@@ -51,6 +51,11 @@ class FakeOrchestrator:
         return {"status": "accepted", "current_score": 8.5}
 
 
+class FakeOpenHandsCLI:
+    def parse_output(self, stdout):
+        return {}
+
+
 class NativeOnlyBridge:
     host_id = "ark"
 
@@ -134,10 +139,25 @@ class ArkNativeN0Tests(unittest.TestCase):
             ark_package.__path__ = []
             orchestrator_module = types.ModuleType("ark.orchestrator")
             orchestrator_module.Orchestrator = FakeOrchestrator
+            engines_package = types.ModuleType("ark.engines")
+            engines_package.__path__ = []
+            cli_module = types.ModuleType("ark.engines.cli")
+            cli_module.OpenHandsCLI = FakeOpenHandsCLI
+
+            def convert_report(command, *, cwd, check):
+                output = next(item.split("=", 1)[1] for item in command if item.startswith("--output="))
+                (Path(cwd) / output).write_text("native ARK report", encoding="utf-8")
+                return types.SimpleNamespace(returncode=0)
+
             with patch.dict(
                 sys.modules,
-                {"ark": ark_package, "ark.orchestrator": orchestrator_module},
-            ):
+                {
+                    "ark": ark_package,
+                    "ark.orchestrator": orchestrator_module,
+                    "ark.engines": engines_package,
+                    "ark.engines.cli": cli_module,
+                },
+            ), patch("rac_ai_scientist.hosts.ark.subprocess.run", side_effect=convert_report):
                 bridge = ArkBridge(
                     upstream,
                     manifest,
