@@ -148,11 +148,26 @@ class AIResearcherBridge(HostBridge):
                 error = result.error
                 break
         report = self.workspace / "report" / "report.md"
-        complete = error is None and report.is_file() and bool(report.read_text(encoding="utf-8", errors="replace").strip())
+        report_text = report.read_text(encoding="utf-8", errors="replace").strip() if report.is_file() else ""
+        report_is_tool_request = (report_text.startswith("```json") and report_text.endswith("```")
+                                  and '"action"' in report_text)
+        code_files = sum(path.is_file() for path in (self.workspace / "code").rglob("*"))
+        result_files = sum(path.is_file() for path in (self.workspace / "outputs").rglob("*"))
+        complete = error is None and bool(report_text) and not report_is_tool_request and code_files > 0 and result_files > 0
+        if complete:
+            reason = "AI-Researcher native Level-1 sequence completed"
+        elif error:
+            reason = error
+        elif report_is_tool_request:
+            reason = "AI-Researcher returned a tool request instead of a report"
+        elif not report_text:
+            reason = "AI-Researcher returned without a report"
+        else:
+            reason = "AI-Researcher returned without code and experiment results"
         self.terminal = True
         return NativeRunResult(
             status="failed" if error else ("completed" if complete else "stop"),
-            reason="AI-Researcher native Level-1 sequence completed" if complete else (error or "AI-Researcher returned without a report"),
+            reason=reason,
             native_iterations=iterations,
             artifacts_before=before,
             artifacts_after=snapshot_workspace(self.workspace),
@@ -166,6 +181,8 @@ class AIResearcherBridge(HostBridge):
                 token_source=self.usage.token_source,
             ),
             native_status="failed" if error else ("completed" if complete else "stopped"),
+            metrics={"code_files": code_files, "result_files": result_files,
+                     "report_is_tool_request": int(report_is_tool_request)},
         )
 
     def checkpoint(self) -> Checkpoint:

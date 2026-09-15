@@ -36,6 +36,41 @@ class ToolArgumentTests(unittest.TestCase):
             self.assertEqual(result.native_status, "failed")
             self.assertEqual(result.native_iterations, 1)
 
+    def test_tool_request_is_not_a_completed_research_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bridge = object.__new__(AIResearcherBridge)
+            bridge.workspace = Path(directory)
+            bridge.client = object()
+            bridge.usage = Usage()
+            bridge.objective = "test task"
+            bridge.completed = set()
+            bridge.invoke = lambda *args: SimpleNamespace(error=None)
+            (bridge.workspace / "report").mkdir()
+            (bridge.workspace / "report/report.md").write_text('```json\n{"action":"read","path":"/tmp/workspace/plans"}\n```')
+            result = bridge.run_native()
+            self.assertEqual(result.status, "stop")
+            self.assertIn("tool request", result.reason)
+            self.assertEqual(result.metrics["report_is_tool_request"], 1)
+
+    def test_report_and_experiment_artifacts_are_completed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bridge = object.__new__(AIResearcherBridge)
+            bridge.workspace = Path(directory)
+            bridge.client = object()
+            bridge.usage = Usage()
+            bridge.objective = "test task"
+            bridge.completed = set()
+            bridge.invoke = lambda *args: SimpleNamespace(error=None)
+            for folder, name, contents in (("report", "report.md", "# Methods\nExperiment and evidence."),
+                                           ("code", "test.py", "print(1)"),
+                                           ("outputs", "metric.csv", "score,1")):
+                (bridge.workspace / folder).mkdir()
+                (bridge.workspace / folder / name).write_text(contents)
+            result = bridge.run_native()
+            self.assertEqual(result.status, "completed")
+            self.assertEqual(result.metrics["code_files"], 1)
+            self.assertEqual(result.metrics["result_files"], 1)
+
     def test_invalid_arguments_are_returned_without_executing_tool(self):
         executed = []
         def native_handle(calls, *args, **kwargs):
