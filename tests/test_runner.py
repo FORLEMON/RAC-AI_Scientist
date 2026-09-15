@@ -1,3 +1,4 @@
+import dataclasses
 import tempfile
 import unittest
 from pathlib import Path
@@ -61,3 +62,21 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(outcome.status, "stop")
             self.assertTrue(ledger.path.is_file())
             self.assertGreaterEqual(len(ledger.path.read_text(encoding="utf-8").splitlines()), 4)
+
+    def test_failed_native_invocation_is_not_completion(self):
+        class FailedBridge(FakeBridge):
+            def invoke(self, capability_id, contract):
+                return InvocationResult(capability_id, "", [], [], error="provider failed")
+
+        with tempfile.TemporaryDirectory() as raw:
+            outcome = EpisodeRunner(FailedBridge(), "N0", JsonlLedger(Path(raw) / "trace.jsonl")).run(hard_hop_limit=2)
+        self.assertEqual(outcome.status, "failed")
+
+    def test_budget_stop_is_not_successful_stop(self):
+        class ExhaustedBridge(FakeBridge):
+            def checkpoint(self):
+                return dataclasses.replace(super().checkpoint(), remaining_budget=Budget(0, 1000, 1000, 5, 100, 5))
+
+        with tempfile.TemporaryDirectory() as raw:
+            outcome = EpisodeRunner(ExhaustedBridge(), "N0", JsonlLedger(Path(raw) / "trace.jsonl")).run(hard_hop_limit=2)
+        self.assertEqual(outcome.status, "budget_exhausted")
