@@ -184,7 +184,7 @@ class AgentLaboratoryBridge(HostBridge):
                 paper_index=0,
                 except_if_fail=True,
                 parallelized=False,
-                lab_dir=str(lab_dir),
+                lab_dir=lab_dir.name,
                 lab_index=0,
                 agentRxiv=False,
             )
