@@ -206,6 +206,7 @@ class DataToPaperBridge(HostBridge):
         error = None
         started = time.monotonic()
         proposed_done = False
+        interrupted = False
         try:
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
                 for stage in self._stages_for(capability_id):
@@ -214,13 +215,23 @@ class DataToPaperBridge(HostBridge):
                     if returned not in (None, True):
                         # Record a native reset request as an unresolved state;
                         # the common policy decides the next invocation.
+                        interrupted = True
+                        if returned is False:
+                            error = "data-to-paper native stage terminated"
                         break
-            self.completed.add(capability_id)
-            if capability_id == "compile":
-                self.terminal = True
-                proposed_done = True
             self._persist_output(capability_id, output.getvalue())
             self._normalize_products()
+            if not interrupted:
+                if capability_id == "compile":
+                    report = self.workspace / "report" / "report.md"
+                    if report.is_file() and report.read_text(encoding="utf-8", errors="replace").strip():
+                        self.completed.add(capability_id)
+                        self.terminal = True
+                        proposed_done = True
+                    else:
+                        error = "data-to-paper compile produced no report"
+                else:
+                    self.completed.add(capability_id)
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
         self.hop += 1
