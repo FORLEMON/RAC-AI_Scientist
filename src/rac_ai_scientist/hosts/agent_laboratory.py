@@ -74,6 +74,31 @@ def _install_arxiv_transport() -> None:
         ArxivSearch.find_papers_by_str = find_papers_by_str
 
 
+def _install_hf_data_search() -> None:
+    """Do not load the remote dataset catalog before a SEARCH_HF command."""
+    import ai_lab_repo
+
+    original = ai_lab_repo.HFDataSearch
+    if getattr(original, "_rac_lazy", False):
+        return
+
+    class LazyHFDataSearch:
+        _rac_lazy = True
+
+        def __init__(self):
+            self.engine = None
+
+        def retrieve_ds(self, query):
+            if self.engine is None:
+                self.engine = original()
+            return self.engine.retrieve_ds(query)
+
+        def results_str(self, datasets):
+            return self.engine.results_str(datasets)
+
+    ai_lab_repo.HFDataSearch = LazyHFDataSearch
+
+
 class AgentLaboratoryBridge(HostBridge):
     """Thin state/invocation bridge over Agent Laboratory's existing phase methods."""
 
@@ -122,6 +147,7 @@ class AgentLaboratoryBridge(HostBridge):
             from ai_lab_repo import LaboratoryWorkflow
 
             _install_arxiv_transport()
+            _install_hf_data_search()
             self._install_model_adapter()
 
             models = {native: self.model for native in NATIVE_NAMES.values()}
