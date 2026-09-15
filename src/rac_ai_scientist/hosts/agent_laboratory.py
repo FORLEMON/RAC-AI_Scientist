@@ -96,6 +96,24 @@ def _install_hf_data_search(workspace: Path) -> None:
     ai_lab_repo.HFDataSearch = SuppliedDataSearch
 
 
+def _install_report_writing_scope() -> None:
+    """Supply the globals incorrectly referenced by the pinned report writer."""
+    import ai_lab_repo
+
+    original = ai_lab_repo.LaboratoryWorkflow.report_writing
+    if getattr(original, "_rac_report_scope", False):
+        return
+
+    def report_writing(workflow):
+        # ponytail: pinned upstream uses module globals; remove when its self.* fix is locked.
+        original.__globals__["research_topic"] = workflow.research_topic
+        original.__globals__["compile_pdf"] = workflow.compile_pdf
+        return original(workflow)
+
+    report_writing._rac_report_scope = True
+    ai_lab_repo.LaboratoryWorkflow.report_writing = report_writing
+
+
 class AgentLaboratoryBridge(HostBridge):
     """Thin state/invocation bridge over Agent Laboratory's existing phase methods."""
 
@@ -145,6 +163,7 @@ class AgentLaboratoryBridge(HostBridge):
 
             _install_arxiv_transport()
             _install_hf_data_search(self.workspace)
+            _install_report_writing_scope()
             self._install_model_adapter()
 
             models = {native: self.model for native in NATIVE_NAMES.values()}
