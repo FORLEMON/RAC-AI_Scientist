@@ -12,7 +12,7 @@ from ..bridge import HostBridge
 from ..issues import extract_review_issues, parse_review_score
 from ..manifest import capability_cards, load_host_manifest
 from ..reproducibility import seed_runtime
-from ..schemas import Budget, Checkpoint, InvocationResult, Issue, Usage, WorkContract
+from ..schemas import Budget, Checkpoint, InvocationResult, Issue, NativeRunResult, Usage, WorkContract
 from .ark import render_contract_prompt
 
 
@@ -103,6 +103,52 @@ class EvoScientistBridge(HostBridge):
         native = self.workspace / "evo_scientist_native"
         native.mkdir(exist_ok=True)
         (native / "objective.md").write_text(objective, encoding="utf-8")
+
+    def initialize_native(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
+        self.initialize(episode_id=episode_id, workspace=workspace, objective=objective, seed=seed)
+
+    def run_native(self) -> NativeRunResult:
+        """Give the complete job once to EvoScientist's native deep agent."""
+        self._require_initialized()
+        assert self.workspace is not None
+        before, usage_before = snapshot_workspace(self.workspace), self.usage
+        started = time.monotonic()
+        prompt = (
+            f"Complete this research task end to end using your native scientific workflow and sub-agents:\n{self.objective}\n\n"
+            "Use only files already supplied in data/ and related_work/. Never seek or infer a hidden target study. "
+            "Run real analyses where feasible, preserve code in code/ and results in outputs/, and write the final "
+            "self-contained Markdown paper to report/report.md. Continue until the report is evidence-grounded and complete."
+        )
+        result = self.agent.invoke(
+            {"messages": [{"role": "user", "content": prompt}]},
+            config={"configurable": {"thread_id": self.episode_id}},
+        )
+        messages = result.get("messages", []) if isinstance(result, dict) else []
+        self._collect_usage(messages)
+        output = _message_text(messages[-1]) if messages else str(result)
+        transcript = self.workspace / "state" / "evo_scientist" / "native_run.md"
+        transcript.parent.mkdir(parents=True, exist_ok=True)
+        transcript.write_text(output, encoding="utf-8")
+        report = self.workspace / "report" / "report.md"
+        complete = report.is_file() and bool(report.read_text(encoding="utf-8", errors="replace").strip())
+        self.terminal = True
+        return NativeRunResult(
+            status="completed" if complete else "stop",
+            reason="EvoScientist native deep-agent run completed" if complete else "EvoScientist returned without report/report.md",
+            native_iterations=1,
+            artifacts_before=before,
+            artifacts_after=snapshot_workspace(self.workspace),
+            usage=Usage(
+                provider_cost_usd=self.usage.provider_cost_usd - usage_before.provider_cost_usd,
+                input_tokens=self.usage.input_tokens - usage_before.input_tokens,
+                output_tokens=self.usage.output_tokens - usage_before.output_tokens,
+                agent_calls=self.usage.agent_calls - usage_before.agent_calls,
+                wall_seconds=time.monotonic() - started,
+                cost_source=self.usage.cost_source,
+                token_source=self.usage.token_source,
+            ),
+            native_status="completed" if complete else "missing_report",
+        )
 
     def checkpoint(self) -> Checkpoint:
         self._require_initialized()

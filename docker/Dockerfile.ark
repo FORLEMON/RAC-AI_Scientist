@@ -20,6 +20,27 @@ RUN python -m pip install --no-cache-dir -e '/opt/host[research]' -e /opt/integr
     && python -m pip install --no-cache-dir uv \
     && uv tool install --python 3.12 openhands
 
+# This Azure deployment exposes GPT-5.5 through Chat Completions. OpenHands
+# otherwise selects Responses API from the model-name registry.
+RUN feature_file="$(find /root/.local/share/uv/tools/openhands/lib \
+        -path '*/site-packages/openhands/sdk/llm/utils/model_features.py' \
+        -print -quit)" \
+    && test -n "$feature_file" \
+    && sed -i '/^RESPONSES_API_MODELS:/,/^]/ { \
+        /^[[:space:]]*"gpt-5",[[:space:]]*$/d; \
+    }' "$feature_file"
+
+# LiteLLM has an independent GPT-5.4+ bridge that can reselect Responses when
+# OpenHands supplies function tools. Keep the actual call on Chat Completions.
+RUN llm_file="$(find /root/.local/share/uv/tools/openhands/lib \
+        -path '*/site-packages/openhands/sdk/llm/llm.py' \
+        -print -quit)" \
+    && test -n "$llm_file" \
+    && sed -i \
+        '/^[[:space:]]*drop_params=self.drop_params,$/a\                    _skip_responses_api_bridge=True,' \
+        "$llm_file" \
+    && grep -q '_skip_responses_api_bridge=True' "$llm_file"
+
 WORKDIR /opt/integration
 ENTRYPOINT ["rac-ai-scientist"]
 CMD ["doctor-host", "--host", "ark"]

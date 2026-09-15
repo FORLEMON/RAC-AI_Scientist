@@ -14,3 +14,13 @@ class ProvenanceTests(unittest.TestCase):
             (root / "a").rename(root / "b")
             second = tree_hash(root)[0]
             self.assertNotEqual(first, second)
+
+    def test_generated_package_metadata_does_not_change_runtime_hash(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "source.py").write_text("value = 1\n", encoding="utf-8")
+            before = tree_hash(root)
+            metadata = root / "package.egg-info"
+            metadata.mkdir()
+            (metadata / "PKG-INFO").write_text("generated", encoding="utf-8")
+            self.assertEqual(tree_hash(root), before)

@@ -8,6 +8,7 @@ from .schemas import ArtifactRecord
 
 IGNORED_PARTS = {".git", "__pycache__", ".pytest_cache", ".venv"}
 PRIVATE_TOP_LEVEL = {
+    ".ark",
     ".rac",
     "agent_laboratory",
     "state_saves",

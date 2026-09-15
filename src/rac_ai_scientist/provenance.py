@@ -8,13 +8,22 @@ IGNORED_PARTS = {".git", "__pycache__", ".pytest_cache"}
 IGNORED_SUFFIXES = {".pyc", ".pyo"}
 
 
+def _is_generated_package_metadata(relative: Path) -> bool:
+    return any(part.endswith((".egg-info", ".dist-info")) for part in relative.parts)
+
+
 def tree_hash(root: Path) -> tuple[str, int, int]:
     digest = hashlib.sha256()
     count = 0
     size = 0
     for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
         relative = path.relative_to(root)
-        if not path.is_file() or IGNORED_PARTS.intersection(relative.parts) or path.suffix in IGNORED_SUFFIXES:
+        if (
+            not path.is_file()
+            or IGNORED_PARTS.intersection(relative.parts)
+            or _is_generated_package_metadata(relative)
+            or path.suffix in IGNORED_SUFFIXES
+        ):
             continue
         file_digest = hashlib.sha256()
         with path.open("rb") as handle:

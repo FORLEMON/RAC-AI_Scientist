@@ -26,6 +26,19 @@ Conditions are cumulative. Within a host/task/seed comparison, model, tools,
 permissions, input artifacts, and lifecycle budget must be identical. Router and
 verifier usage is charged to the same lifecycle budget.
 
+Every N0 episode bypasses the RAC episode runner. The integration layer invokes
+the host-owned top-level lifecycle once and records only the native boundary,
+artifacts, usage, and terminal state: ARK `Orchestrator.run()`, Agent Laboratory
+`LaboratoryWorkflow.perform_research()`, data-to-paper `run_all_steps()`,
+AutoResearchClaw `execute_pipeline()`, and one complete EvoScientist Deep Agent
+job. ARK retains native caps of three development and three paper-review
+iterations. AI-Researcher's published Level-1 launcher is coupled to its own ML
+benchmark schema and nested Docker layout; its N0 compatibility path keeps the
+native MetaChain agents and fixed Level-1 ordering while mapping a sanitized
+ResearchClawBench workspace into that flow. It is reported explicitly as a
+compatibility-native run, not as an unmodified invocation of the upstream CLI.
+R1--R5 continue to use the capability-level RAC runner for every host.
+
 ## Repository boundary
 
 The eight source directories currently collected beside this file are local

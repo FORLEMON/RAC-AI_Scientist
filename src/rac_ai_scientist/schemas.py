@@ -136,6 +136,20 @@ class Usage:
 
 
 @dataclass
+class NativeRunResult:
+    """Outcome reported by a host after it runs its own native scheduler."""
+
+    status: str
+    reason: str
+    native_iterations: int
+    artifacts_before: list[ArtifactRecord]
+    artifacts_after: list[ArtifactRecord]
+    usage: Usage = field(default_factory=Usage)
+    native_status: str | None = None
+    metrics: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
 class InvocationResult:
     capability_id: str
     output: str
