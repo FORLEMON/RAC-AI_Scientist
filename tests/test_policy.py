@@ -59,6 +59,17 @@ class PolicyTests(unittest.TestCase):
         result = InvocationResult("run", "", [before], [after], timed_out=True)
         evaluated = policy.evaluate(cp, decision, result)
         self.assertIs(evaluated.action, Action.RECOVER)
+        self.assertEqual(evaluated.verification.verdict.value, "refuted")
+
+    def test_error_cannot_be_overridden_by_satisfied_artifact_evidence(self):
+        cp = checkpoint()
+        policy = SharedPolicy(Condition.R3)
+        decision = policy.decide(cp)
+        report = ArtifactRecord("r", "report/report.md", "terminal_report", "new", 300)
+        result = InvocationResult("write", "apparently done", [], [report], error="provider failed", proposed_done=True)
+        verification = verify_result(decision.contract, result)
+        self.assertEqual(verification.verdict.value, "refuted")
+        self.assertIn("invocation_error", [item.name for item in verification.checks])
 
     def test_verifier_rejects_undeclared_canonical_write(self):
         contract = SharedPolicy(Condition.R3).decide(checkpoint()).contract

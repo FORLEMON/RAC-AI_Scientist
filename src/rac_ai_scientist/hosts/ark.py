@@ -241,8 +241,18 @@ class ArkBridge(HostBridge):
                 shutil.move(report, drafts / f"report_draft_{self.hop}.md")
         if "Work in progress." in source.read_text(encoding="utf-8"):
             return
-        subprocess.run(["pandoc", "--from=latex", "--to=gfm", "--wrap=none", "--output=report.md", "main.tex"],
-                       cwd=source.parent, check=True)
+        temporary = source.parent / ".report.md.tmp"
+        try:
+            subprocess.run(
+                ["pandoc", "--from=latex", "--to=gfm", "--wrap=none", f"--output={temporary.name}", source.name],
+                cwd=source.parent,
+                check=True,
+            )
+            if not temporary.is_file() or temporary.stat().st_size == 0:
+                raise RuntimeError("pandoc did not produce a non-empty Markdown report")
+            temporary.replace(report)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _usage_totals(self) -> Usage:
         stats = getattr(self.orchestrator, "_agent_stats", []) if self.orchestrator else []
@@ -263,15 +273,30 @@ class ArkBridge(HostBridge):
 
         def parse_output(cli, stdout):
             parsed = original(cli, stdout)
+            if not isinstance(parsed, dict):
+                return parsed
             conversation_id = parsed.get("conversation_id")
-            if not conversation_id or parsed.get("usage") is None:
+            usage = parsed.get("usage")
+            if not conversation_id or not isinstance(usage, dict):
                 return parsed
             root = Path(os.environ.get("ARK_OPENHANDS_CONV_DIR") or Path.home() / ".openhands" / "conversations")
-            state = root / conversation_id / "base_state.json"
-            metrics = json.loads(state.read_text(encoding="utf-8"))["stats"]["usage_to_metrics"]
-            count = sum(len(item.get("token_usages") or []) for item in metrics.values())
+            state = root / str(conversation_id) / "base_state.json"
+            try:
+                metrics = json.loads(state.read_text(encoding="utf-8"))["stats"]["usage_to_metrics"]
+                if not isinstance(metrics, dict):
+                    return parsed
+                count = sum(
+                    len(token_usages)
+                    for item in metrics.values()
+                    if isinstance(item, dict)
+                    and isinstance((token_usages := item.get("token_usages")), (list, tuple))
+                )
+            except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+                # Metrics are optional instrumentation. Missing or partially written
+                # state must retain the conservative one-request-per-phase fallback.
+                return parsed
             if count:
-                parsed["usage"]["model_requests"] = count
+                usage["model_requests"] = count
             return parsed
 
         parse_output._rac_counted = True

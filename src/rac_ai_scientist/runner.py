@@ -6,7 +6,7 @@ from .bridge import HostBridge, validate_bridge_checkpoint
 from .conditions import Condition
 from .ledger import JsonlLedger
 from .policy import SharedPolicy
-from .schemas import Action, CoordinationDecision, Verdict, to_jsonable
+from .schemas import Action, CoordinationDecision, to_jsonable
 
 
 @dataclass(frozen=True)
@@ -65,8 +65,7 @@ class EpisodeRunner:
             pending = self.policy.evaluate(checkpoint, decision, result)
             self.ledger.append({"type": "evaluation", "hop": hop, "payload": pending})
             if pending.action is Action.STOP:
-                verified = pending.verification is not None and pending.verification.verdict is Verdict.SUPPORTED
-                if (result.error or result.timed_out) and not verified:
+                if result.error or result.timed_out:
                     return EpisodeOutcome("timed_out" if result.timed_out else "failed", hop + 1, pending.reason)
                 return EpisodeOutcome("completed", hop + 1, pending.reason)
         return EpisodeOutcome("budget_exhausted", hard_hop_limit, "hard hop limit reached")

@@ -203,8 +203,10 @@ def verify_result(contract: WorkContract, result: InvocationResult) -> Verificat
         else:  # pragma: no cover - dataclass Literal protects typed callers
             checks.append(CheckResult(str(requirement.kind), False, "unknown evidence requirement"))
 
-    if result.error and not changed:
+    if result.error:
         checks.append(CheckResult("invocation_error", False, result.error))
+    if result.timed_out:
+        checks.append(CheckResult("invocation_timeout", False, "capability timed out"))
     passed = checks and all(item.passed for item in checks)
     if passed:
         return Verification(Verdict.SUPPORTED, "all contract evidence checks passed", tuple(checks))

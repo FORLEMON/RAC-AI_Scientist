@@ -34,6 +34,26 @@ class ArkUsageTests(unittest.TestCase):
             self.assertEqual(parsed["usage"]["model_requests"], 4)
             self.assertEqual(bridge._usage_totals().agent_calls, 4)
 
+    def test_missing_or_invalid_openhands_metrics_use_phase_fallback(self):
+        class FakeOpenHandsCLI:
+            def parse_output(self, stdout):
+                return {"conversation_id": stdout, "usage": {"input_tokens": 100, "output_tokens": 20}}
+
+        with tempfile.TemporaryDirectory() as raw:
+            invalid = Path(raw) / "invalid"
+            invalid.mkdir()
+            (invalid / "base_state.json").write_text("not json", encoding="utf-8")
+            with patch.dict(os.environ, {"ARK_OPENHANDS_CONV_DIR": raw}):
+                ArkBridge._install_openhands_usage(FakeOpenHandsCLI)
+                missing = FakeOpenHandsCLI().parse_output("missing")
+                malformed = FakeOpenHandsCLI().parse_output("invalid")
+
+        self.assertNotIn("model_requests", missing["usage"])
+        self.assertNotIn("model_requests", malformed["usage"])
+        bridge = object.__new__(ArkBridge)
+        bridge.orchestrator = types.SimpleNamespace(_agent_stats=[missing["usage"], malformed["usage"]])
+        self.assertEqual(bridge._usage_totals().agent_calls, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
