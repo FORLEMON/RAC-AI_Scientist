@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -225,8 +226,19 @@ class ArkBridge(HostBridge):
     def _normalize_report(self) -> None:
         assert self.workspace is not None
         source = self.workspace / "report" / "main.tex"
-        if source.is_file() and source.stat().st_size > 0:
-            shutil.copyfile(source, self.workspace / "report" / "report.md")
+        if not source.is_file() or source.stat().st_size == 0:
+            return
+        report = source.parent / "report.md"
+        if report.is_file():
+            existing = report.read_text(encoding="utf-8")
+            if "TO BE WRITTEN" in existing or "Work in progress." in existing:
+                drafts = self.workspace / "state" / "ark"
+                drafts.mkdir(parents=True, exist_ok=True)
+                shutil.move(report, drafts / f"report_draft_{self.hop}.md")
+        if "Work in progress." in source.read_text(encoding="utf-8"):
+            return
+        subprocess.run(["pandoc", "--from=latex", "--to=gfm", "--wrap=none", "--output=report.md", "main.tex"],
+                       cwd=source.parent, check=True)
 
     def _usage_totals(self) -> Usage:
         stats = getattr(self.orchestrator, "_agent_stats", []) if self.orchestrator else []
