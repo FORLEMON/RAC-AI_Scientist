@@ -13,7 +13,8 @@ COPY src /opt/integration/src
 COPY configs /opt/integration/configs
 COPY upstream.lock.json /opt/integration/upstream.lock.json
 
-RUN python -m pip install --no-cache-dir -e '/opt/host[all]' -e /opt/integration
+RUN python -m pip install --no-cache-dir -e '/opt/host[all]' -e /opt/integration \
+    && python -m playwright install --with-deps --only-shell chromium
 
 WORKDIR /opt/integration
 ENTRYPOINT ["rac-ai-scientist"]
