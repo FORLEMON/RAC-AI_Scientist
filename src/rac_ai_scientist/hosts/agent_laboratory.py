@@ -39,6 +39,41 @@ REQUIRED_TAGS = {
 }
 
 
+class _ArxivTimedSession:
+    def __init__(self, inner):
+        self.inner = inner
+
+    def get(self, url, **kwargs):
+        return self.inner.get(url, timeout=(5, 30), **kwargs)
+
+
+def _install_arxiv_transport() -> None:
+    """Bound Agent Laboratory's pinned arxiv.py transport and surface search failures."""
+    import arxiv
+    from tools import ArxivSearch
+
+    original_init = arxiv.Client.__init__
+    if not getattr(original_init, "_rac_deadline", False):
+        def init(client, *args, **kwargs):
+            original_init(client, *args, **kwargs)
+            client.num_retries = 0  # The native search tool already retries three times.
+            client._session = _ArxivTimedSession(client._session)
+
+        init._rac_deadline = True
+        arxiv.Client.__init__ = init
+
+    original_search = ArxivSearch.find_papers_by_str
+    if not getattr(original_search, "_rac_error", False):
+        def find_papers_by_str(search, query, N=20):
+            papers = original_search(search, query, N)
+            if papers is None:
+                raise RuntimeError("arXiv API search failed after native retries")
+            return papers
+
+        find_papers_by_str._rac_error = True
+        ArxivSearch.find_papers_by_str = find_papers_by_str
+
+
 class AgentLaboratoryBridge(HostBridge):
     """Thin state/invocation bridge over Agent Laboratory's existing phase methods."""
 
@@ -86,6 +121,7 @@ class AgentLaboratoryBridge(HostBridge):
             os.chdir(self.workspace)
             from ai_lab_repo import LaboratoryWorkflow
 
+            _install_arxiv_transport()
             self._install_model_adapter()
 
             models = {native: self.model for native in NATIVE_NAMES.values()}
