@@ -16,6 +16,7 @@ from .matrix import expand_matrix
 from .runner import EpisodeRunner
 from .schemas import Budget, to_jsonable
 from .provenance import tree_hash
+from .hosts.registry import HOST_IDS, local_snapshot_name, make_bridge
 
 
 def _doctor(args: argparse.Namespace) -> int:
@@ -100,12 +101,7 @@ def _score_episode(args: argparse.Namespace) -> int:
 
 
 def _resolve_upstream(root: Path, host: str) -> Path:
-    local_names = {
-        "ark": "ARK",
-        "agent_laboratory": "AgentLaboratory-main",
-        "data_to_paper": "data-to-paper-main",
-    }
-    candidates = (root / local_names[host], root / "upstreams" / host)
+    candidates = (root / local_snapshot_name(host), root / "upstreams" / host)
     for candidate in candidates:
         if candidate.exists():
             return candidate
@@ -159,18 +155,7 @@ def _run_one(args: argparse.Namespace) -> int:
     episode_dir.mkdir(parents=True)
     materialize_rcb_workspace(task_dir, workspace)
     assert_no_target_study(workspace)
-    if args.host == "ark":
-        from .hosts.ark import ArkBridge
-
-        bridge = ArkBridge(upstream, manifest, budget, model, api_key)
-    elif args.host == "agent_laboratory":
-        from .hosts.agent_laboratory import AgentLaboratoryBridge
-
-        bridge = AgentLaboratoryBridge(upstream, manifest, budget, model, api_key)
-    else:
-        from .hosts.data_to_paper import DataToPaperBridge
-
-        bridge = DataToPaperBridge(upstream, manifest, budget, model, api_key)
+    bridge = make_bridge(args.host, upstream, manifest, budget, model, api_key)
     run_config = {
         "host": args.host,
         "condition": args.condition,
@@ -201,7 +186,8 @@ def _run_one(args: argparse.Namespace) -> int:
         lock = json.loads(lock_path.read_text(encoding="utf-8"))
         spec = lock.get("upstreams", {}).get(args.host, {})
         actual_tree, file_count, byte_count = tree_hash(upstream)
-        expected_tree = spec.get("tree_sha256")
+        local_snapshot = root / spec.get("local_snapshot", "")
+        expected_tree = spec.get("snapshot_tree_sha256") if upstream == local_snapshot.resolve() and spec.get("snapshot_tree_sha256") else spec.get("tree_sha256")
         source_mismatch = bool(expected_tree and actual_tree != expected_tree)
         metadata["upstream"] = {
             "revision": spec.get("revision"),
@@ -245,7 +231,7 @@ def _verify_upstreams(args: argparse.Namespace) -> int:
             failed = True
             continue
         digest, count, size = tree_hash(source)
-        expected = spec.get("tree_sha256")
+        expected = spec.get("snapshot_tree_sha256") if source == (root / spec["local_snapshot"]) and spec.get("snapshot_tree_sha256") else spec.get("tree_sha256")
         state = "OK" if expected == digest else "MISMATCH"
         print(f"[{state}] {name}: {digest} files={count} bytes={size}")
         failed = failed or state != "OK"
@@ -259,6 +245,9 @@ def _doctor_host(args: argparse.Namespace) -> int:
         "ark": (("yaml", "litellm"), ("openhands",)),
         "agent_laboratory": (("openai", "torch", "yaml", "pypdf"), ()),
         "data_to_paper": (("openai", "pandas", "PySide6"), ("pdflatex",)),
+        "ai_researcher": (("litellm", "pydantic", "tiktoken", "torch"), ()),
+        "evo_scientist": (("deepagents", "langchain", "langgraph", "yaml"), ()),
+        "auto_research_claw": (("yaml", "rich", "numpy"), ()),
     }
     import shutil
 
@@ -295,7 +284,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.set_defaults(func=_prepare_task)
     run = sub.add_parser("run-one", help="run one host/condition/task episode")
     run.add_argument("--project-root", default=str(Path(__file__).resolve().parents[2]))
-    run.add_argument("--host", required=True, choices=("ark", "agent_laboratory", "data_to_paper"))
+    run.add_argument("--host", required=True, choices=HOST_IDS)
     run.add_argument("--upstream", help="explicit host checkout (or set RAC_HOST_ROOT)")
     run.add_argument("--condition", required=True, choices=("N0", "R1", "R2", "R3", "R4", "R5"))
     run.add_argument("--task-dir", required=True)
@@ -317,7 +306,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify.set_defaults(func=_verify_upstreams)
     host = sub.add_parser("doctor-host", help="check one host environment without model calls")
     host.add_argument("--project-root", default=str(Path(__file__).resolve().parents[2]))
-    host.add_argument("--host", required=True, choices=("ark", "agent_laboratory", "data_to_paper"))
+    host.add_argument("--host", required=True, choices=HOST_IDS)
     host.add_argument("--upstream", help="explicit host checkout (or set RAC_HOST_ROOT)")
     host.set_defaults(func=_doctor_host)
     score = sub.add_parser("score-episode", help="score a finished episode outside the evaluated host")

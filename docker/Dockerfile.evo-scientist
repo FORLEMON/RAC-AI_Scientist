@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 RAC_HOST_ROOT=/opt/host \
+    EVOSCIENTIST_DISABLE_UPDATE_CHECK=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential git curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=host . /opt/host
+COPY pyproject.toml README.md LICENSE /opt/integration/
+COPY src /opt/integration/src
+COPY configs /opt/integration/configs
+COPY upstream.lock.json /opt/integration/upstream.lock.json
+
+RUN python -m pip install --no-cache-dir -e /opt/host -e /opt/integration
+
+WORKDIR /opt/integration
+ENTRYPOINT ["rac-ai-scientist"]
+CMD ["doctor-host", "--host", "evo_scientist"]

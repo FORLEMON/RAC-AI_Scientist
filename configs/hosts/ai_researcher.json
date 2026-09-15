@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "host_id": "ai_researcher",
+  "native_entrypoint": "AI-Researcher MetaChain agents",
+  "capabilities": [
+    {"capability_id":"idea","description":"Generate or refine the research idea","tags":["planning","literature"],"readable_artifacts":["task.json","related_work/**","data/**"],"writable_artifacts":["state/**"],"produces":["plan"],"native_successors":["survey"]},
+    {"capability_id":"survey","description":"Survey atomic definitions, papers, and implementations","tags":["literature","analysis"],"readable_artifacts":["state/**","related_work/**"],"writable_artifacts":["state/**"],"produces":["literature"],"native_successors":["implementation_plan"]},
+    {"capability_id":"implementation_plan","description":"Plan dataset, model, training, and tests","tags":["planning","experiment"],"readable_artifacts":["state/**","data/**"],"writable_artifacts":["state/**"],"produces":["plan"],"native_successors":["implementation"]},
+    {"capability_id":"implementation","description":"Implement and execute the planned research code","tags":["code","experiment","debug"],"readable_artifacts":["state/**","data/**","code/**"],"writable_artifacts":["code/**","outputs/**","state/**"],"produces":["code","result"],"native_successors":["experiment_analysis"]},
+    {"capability_id":"experiment_analysis","description":"Analyze experimental evidence and propose follow-up work","tags":["analysis","experiment","figure"],"readable_artifacts":["code/**","outputs/**","state/**"],"writable_artifacts":["outputs/**","state/**","report/images/**"],"produces":["analysis","result","figure"],"native_successors":["implementation","paper_writing"]},
+    {"capability_id":"paper_writing","description":"Generate an evidence-grounded scientific report","tags":["writing","finalize"],"readable_artifacts":["state/**","outputs/**","code/**","related_work/**"],"writable_artifacts":["report/**","state/**"],"produces":["terminal_report"],"native_successors":["review"]},
+    {"capability_id":"review","description":"Review the report against persisted evidence","tags":["terminal_review"],"readable_artifacts":["report/**","outputs/**","code/**"],"writable_artifacts":["state/**"],"produces":["review"],"native_successors":["implementation_plan","implementation","paper_writing"]}
+  ]
+}

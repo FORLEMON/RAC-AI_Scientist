@@ -1,8 +1,9 @@
 # RAC × AI Scientist
 
 This repository is the integration and evaluation layer for applying Runtime
-Agent Coordination (RAC) to three AI-scientist hosts—ARK, Agent Laboratory, and
-data-to-paper—and evaluating them on ResearchClawBench.
+Agent Coordination (RAC) to six AI-scientist hosts—ARK, Agent Laboratory,
+data-to-paper, AI-Researcher, EvoScientist, and AutoResearchClaw—and evaluating
+them on ResearchClawBench.
 
 The repository deliberately keeps upstream projects separate. The integration
 package owns the shared N0–R5 policy, schemas, accounting, host bridges, and
@@ -27,7 +28,7 @@ verifier usage is charged to the same lifecycle budget.
 
 ## Repository boundary
 
-The five source directories currently collected beside this file are local
+The eight source directories currently collected beside this file are local
 read-only snapshots and are ignored by Git. `upstream.lock.json` records their
 provenance. Fresh checkouts should be placed under `upstreams/` by the bootstrap
 script; generated runs go under `runs/`.
@@ -57,10 +58,16 @@ revisions, host environments, credentials, task selection, and budget fields are
 explicitly configured.
 
 To materialize resolved upstream revisions, run `python scripts/bootstrap.py`.
-The four live dependencies are revision-pinned. The private/unpublished RAC
+The seven live dependencies are revision-pinned. The private/unpublished RAC
 research snapshot is optional because the runnable experiment profile lives in
 this repository; `--allow-floating` remains an explicit, non-reproducible
 development escape hatch.
+
+AI-Researcher's upstream tree contains filenames that are illegal on Windows
+(`:` and `?`). The collected Windows snapshot records its portable extraction
+hash and seven omitted template files separately from the canonical Git tree.
+For a byte-complete bootstrap of that host, clone/build on a Linux filesystem;
+the adapter does not depend on those omitted writing-template filenames.
 
 After filling a copied experiment config, expand the complete Cartesian product
 without calling a model:
@@ -97,9 +104,19 @@ this collected workspace, point Compose at the existing snapshots:
 $env:ARK_CONTEXT = "./ARK"
 $env:AGENT_LABORATORY_CONTEXT = "./AgentLaboratory-main"
 $env:DATA_TO_PAPER_CONTEXT = "./data-to-paper-main"
+$env:AI_RESEARCHER_CONTEXT = "./AI-Researcher-main"
+$env:EVO_SCIENTIST_CONTEXT = "./EvoScientist-main"
+$env:AUTO_RESEARCH_CLAW_CONTEXT = "./AutoResearchClaw-main"
 $env:RCB_CONTEXT = "./ResearchClawBench-main"
 docker compose build ark
 docker compose run --rm ark doctor-host --host ark
+```
+
+The three added services follow the same pattern. For example:
+
+```powershell
+docker compose build evo-scientist
+docker compose run --rm evo-scientist doctor-host --host evo_scientist
 ```
 
 In a fresh GitHub clone, run `python scripts/bootstrap.py` first and keep the
@@ -118,12 +135,17 @@ The live container reads `/input/task` and writes to the mounted `/runs`
 directory:
 
 ```bash
-docker compose run --rm ark run-one --host ark --condition R5 \
+docker compose run --rm <service> run-one --host <host-id> --condition R5 \
   --task-dir /input/task --run-root /runs \
   --max-cost-usd 20 --max-input-tokens 1000000 \
   --max-output-tokens 200000 --max-agent-calls 40 \
   --max-wall-seconds 14400 --max-hops 20
 ```
+
+Service/host-id pairs are `ark`/`ark`, `agent-laboratory`/`agent_laboratory`,
+`data-to-paper`/`data_to_paper`, `ai-researcher`/`ai_researcher`,
+`evo-scientist`/`evo_scientist`, and
+`auto-research-claw`/`auto_research_claw`.
 
 After the evaluated host exits, score it in the separate judge image. Only this
 image contains `target_study`:

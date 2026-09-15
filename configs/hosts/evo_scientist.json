@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "host_id": "evo_scientist",
+  "native_entrypoint": "EvoScientist.create_cli_agent",
+  "capabilities": [
+    {"capability_id":"planner","description":"Build and update a scientific execution plan","tags":["planning"],"readable_artifacts":["task.json","data/**","related_work/**","state/**"],"writable_artifacts":["state/**"],"produces":["plan"],"native_successors":["research","code"]},
+    {"capability_id":"research","description":"Perform literature and source research","tags":["literature","analysis"],"readable_artifacts":["related_work/**","state/**"],"writable_artifacts":["state/**"],"produces":["literature"],"native_successors":["planner","code"]},
+    {"capability_id":"code","description":"Implement and run scientific code","tags":["code","experiment"],"readable_artifacts":["data/**","state/**","code/**"],"writable_artifacts":["code/**","outputs/**"],"produces":["code","result"],"native_successors":["debug","data_analysis"]},
+    {"capability_id":"debug","description":"Diagnose and repair implementation failures","tags":["debug","code"],"readable_artifacts":["code/**","outputs/**"],"writable_artifacts":["code/**","outputs/**","state/**"],"produces":["code","result"],"native_successors":["code","data_analysis"]},
+    {"capability_id":"data_analysis","description":"Analyze results and create evidence visualizations","tags":["analysis","figure","experiment"],"readable_artifacts":["data/**","outputs/**","code/**"],"writable_artifacts":["outputs/**","report/images/**","state/**"],"produces":["analysis","figure","result"],"native_successors":["writing"]},
+    {"capability_id":"writing","description":"Write the final scientific report","tags":["writing","finalize"],"readable_artifacts":["state/**","outputs/**","related_work/**"],"writable_artifacts":["report/**"],"produces":["terminal_report"],"native_successors":["review"]},
+    {"capability_id":"review","description":"Review the final report and expose issues","tags":["terminal_review"],"readable_artifacts":["report/**","outputs/**","code/**"],"writable_artifacts":["state/**"],"produces":["review"],"native_successors":["planner","code","writing"]}
+  ]
+}

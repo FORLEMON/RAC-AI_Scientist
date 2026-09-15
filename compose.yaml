@@ -31,6 +31,33 @@ services:
     environment: *agent_environment
     volumes: *run_volumes
 
+  ai-researcher:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ai-researcher
+      additional_contexts:
+        host: ${AI_RESEARCHER_CONTEXT:-./upstreams/ai_researcher}
+    environment: *agent_environment
+    volumes: *run_volumes
+
+  evo-scientist:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.evo-scientist
+      additional_contexts:
+        host: ${EVO_SCIENTIST_CONTEXT:-./upstreams/evo_scientist}
+    environment: *agent_environment
+    volumes: *run_volumes
+
+  auto-research-claw:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.auto-research-claw
+      additional_contexts:
+        host: ${AUTO_RESEARCH_CLAW_CONTEXT:-./upstreams/auto_research_claw}
+    environment: *agent_environment
+    volumes: *run_volumes
+
   scorer:
     build:
       context: .

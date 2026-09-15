@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "experiment_id": "rcb_core_pilot",
-  "hosts": ["ark", "agent_laboratory", "data_to_paper"],
+  "hosts": ["ark", "agent_laboratory", "data_to_paper", "ai_researcher", "evo_scientist", "auto_research_claw"],
   "conditions": ["N0", "R1", "R2", "R3", "R4", "R5"],
   "tasks": [],
   "seeds": [0],

@@ -40,7 +40,9 @@ def validate_config(data: dict[str, Any], root: Path) -> list[DoctorFinding]:
         findings.append(DoctorFinding("ERROR", "at least one condition is required"))
 
     hosts = data.get("hosts", [])
-    allowed_hosts = {"ark", "agent_laboratory", "data_to_paper"}
+    from .hosts.registry import HOST_IDS
+
+    allowed_hosts = set(HOST_IDS)
     unknown = sorted(set(hosts) - allowed_hosts)
     if unknown:
         findings.append(DoctorFinding("ERROR", f"unknown hosts: {', '.join(unknown)}"))

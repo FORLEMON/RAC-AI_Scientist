@@ -7,7 +7,16 @@ from .schemas import ArtifactRecord
 
 
 IGNORED_PARTS = {".git", "__pycache__", ".pytest_cache", ".venv"}
-PRIVATE_TOP_LEVEL = {".rac", "agent_laboratory", "state_saves", "d2p_native", "auto_research"}
+PRIVATE_TOP_LEVEL = {
+    ".rac",
+    "agent_laboratory",
+    "state_saves",
+    "d2p_native",
+    "auto_research",
+    "ai_researcher_native",
+    "evo_scientist_native",
+    "auto_research_claw_native",
+}
 
 
 def artifact_kind(relative: Path) -> str:

@@ -1,6 +1,6 @@
 # Architecture and experimental boundary
 
-## One policy, three host interfaces
+## One policy, six host interfaces
 
 The common runner owns the episode loop. At each hop it requests a normalized
 checkpoint from the host bridge. The checkpoint contains the objective, native
@@ -18,8 +18,9 @@ ResearchClawBench task workspace
               |
               v
       HostBridge protocol
-       /       |       \
-     ARK   Agent Lab   data-to-paper
+       |-- ARK                 |-- AI-Researcher
+       |-- Agent Laboratory    |-- EvoScientist
+       |-- data-to-paper       `-- AutoResearchClaw
 ```
 
 The bridge owns translation, not policy. It may:
@@ -57,10 +58,12 @@ material.
 
 ## Environment boundary
 
-The three hosts cannot safely share one Python environment. ARK uses modern
+The six hosts cannot safely share one Python environment. ARK uses modern
 LiteLLM/OpenAI dependencies, Agent Laboratory has a large pinned ML stack, and
-data-to-paper 1.1.22 pins the pre-1.0 OpenAI client and PySide. Each host therefore
-runs in its own image/virtual environment. The small integration package is
+data-to-paper 1.1.22 pins the pre-1.0 OpenAI client and PySide. AI-Researcher,
+EvoScientist, and AutoResearchClaw add separate MetaChain, DeepAgents/LangGraph,
+and ResearchClaw pipeline stacks. Each host therefore runs in its own
+image/virtual environment. The small integration package is
 installed inside each image and imports only that image's host bridge; no two
 host dependency stacks share a process. Episode state and coordination traces
 cross runs only as JSON/JSONL and persisted artifacts.
