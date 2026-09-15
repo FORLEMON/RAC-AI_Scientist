@@ -7,7 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     RAC_HOST_ROOT=/opt/host
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git texlive-latex-base texlive-latex-extra texlive-fonts-recommended \
+    build-essential git pandoc texlive-latex-base texlive-latex-extra texlive-fonts-recommended \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=host . /opt/host

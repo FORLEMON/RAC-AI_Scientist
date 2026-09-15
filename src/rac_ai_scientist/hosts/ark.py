@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -94,6 +96,9 @@ class ArkBridge(HostBridge):
         if str(self.upstream) not in sys.path:
             sys.path.insert(0, str(self.upstream))
         from ark.orchestrator import Orchestrator
+        from ark.engines.cli import OpenHandsCLI
+
+        self._install_openhands_usage(OpenHandsCLI)
 
         self.orchestrator = Orchestrator(
             project=episode_id,
@@ -225,8 +230,19 @@ class ArkBridge(HostBridge):
     def _normalize_report(self) -> None:
         assert self.workspace is not None
         source = self.workspace / "report" / "main.tex"
-        if source.is_file() and source.stat().st_size > 0:
-            shutil.copyfile(source, self.workspace / "report" / "report.md")
+        if not source.is_file() or source.stat().st_size == 0:
+            return
+        report = source.parent / "report.md"
+        if report.is_file():
+            existing = report.read_text(encoding="utf-8")
+            if "TO BE WRITTEN" in existing or "Work in progress." in existing:
+                drafts = self.workspace / "state" / "ark"
+                drafts.mkdir(parents=True, exist_ok=True)
+                shutil.move(report, drafts / f"report_draft_{self.hop}.md")
+        if "Work in progress." in source.read_text(encoding="utf-8"):
+            return
+        subprocess.run(["pandoc", "--from=latex", "--to=gfm", "--wrap=none", "--output=report.md", "main.tex"],
+                       cwd=source.parent, check=True)
 
     def _usage_totals(self) -> Usage:
         stats = getattr(self.orchestrator, "_agent_stats", []) if self.orchestrator else []
@@ -234,10 +250,32 @@ class ArkBridge(HostBridge):
             provider_cost_usd=sum(float(item.get("cost_usd", 0) or 0) for item in stats),
             input_tokens=sum(int(item.get("input_tokens", 0) or 0) for item in stats),
             output_tokens=sum(int(item.get("output_tokens", 0) or 0) for item in stats),
-            agent_calls=len(stats),
+            agent_calls=sum(int(item.get("model_requests", 1)) for item in stats),
             cost_source="host_estimate",
             token_source="provider_response",
         )
+
+    @staticmethod
+    def _install_openhands_usage(cli_type: type) -> None:
+        original = cli_type.parse_output
+        if getattr(original, "_rac_counted", False):
+            return
+
+        def parse_output(cli, stdout):
+            parsed = original(cli, stdout)
+            conversation_id = parsed.get("conversation_id")
+            if not conversation_id or parsed.get("usage") is None:
+                return parsed
+            root = Path(os.environ.get("ARK_OPENHANDS_CONV_DIR") or Path.home() / ".openhands" / "conversations")
+            state = root / conversation_id / "base_state.json"
+            metrics = json.loads(state.read_text(encoding="utf-8"))["stats"]["usage_to_metrics"]
+            count = sum(len(item.get("token_usages") or []) for item in metrics.values())
+            if count:
+                parsed["usage"]["model_requests"] = count
+            return parsed
+
+        parse_output._rac_counted = True
+        cli_type.parse_output = parse_output
 
     def _timeout(self) -> int:
         elapsed = time.monotonic() - self.started

@@ -83,6 +83,7 @@ class AutoResearchClawBridge(HostBridge):
             "security": {"hitl_required_stages": [], "allow_publish_without_approval": True},
             "experiment": {"mode": "sandbox", "time_budget_sec": max(1, min(3600, int(self.initial_budget.wall_seconds))),
                            "max_iterations": max(1, min(10, self.initial_budget.hops)),
+                           "sandbox": {"python_path": sys.executable},
                            "cli_agent": {"provider": "llm", "max_budget_usd": self.initial_budget.provider_cost_usd}},
             "memory": {"enabled": True, "store_dir": str(self.run_dir / "memory")},
             "skills": {"enabled": True},
