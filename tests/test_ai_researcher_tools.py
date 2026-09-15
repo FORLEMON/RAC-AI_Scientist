@@ -9,6 +9,17 @@ from rac_ai_scientist.schemas import Usage
 
 
 class ToolArgumentTests(unittest.TestCase):
+    def test_empty_encoding_is_normalized_only_for_zero_input_schema(self):
+        calls = [SimpleNamespace(function=SimpleNamespace(name=name, arguments=raw))
+                 for name, raw in [('page_down', ''), ('read', ''), ('unknown', ''), ('page_down', '{')]]
+        result = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=calls))])
+        tools = [
+            {'type': 'function', 'function': {'name': 'page_down', 'parameters': {'type': 'object', 'properties': {}}}},
+            {'type': 'function', 'function': {'name': 'read', 'parameters': {'type': 'object', 'properties': {'path': {'type': 'string'}}, 'required': ['path']}}},
+        ]
+        AIResearcherBridge._normalize_empty_tool_arguments(result, tools)
+        self.assertEqual([call.function.arguments for call in calls], ['{}', '', '', '{'])
+
     def test_native_error_is_failed_even_when_report_exists(self):
         with tempfile.TemporaryDirectory() as directory:
             bridge = object.__new__(AIResearcherBridge)

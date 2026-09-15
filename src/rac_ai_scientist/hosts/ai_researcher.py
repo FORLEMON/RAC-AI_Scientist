@@ -276,6 +276,7 @@ class AIResearcherBridge(HostBridge):
             kwargs["api_key"] = bridge.api_key
             kwargs["max_tokens"] = max(1, bridge.initial_budget.output_tokens - bridge.usage.output_tokens)
             result = await original(**kwargs)
+            bridge._normalize_empty_tool_arguments(result, kwargs.get("tools") or [])
             raw_usage = getattr(result, "usage", None)
             inp = int(getattr(raw_usage, "prompt_tokens", 0) or 0)
             out = int(getattr(raw_usage, "completion_tokens", 0) or 0)
@@ -287,6 +288,20 @@ class AIResearcherBridge(HostBridge):
                 "provider_response" if cost is not None else "unavailable", "provider_response")
             return result
         core.acompletion = completion
+
+    @staticmethod
+    def _normalize_empty_tool_arguments(result, tools) -> None:
+        """An empty encoding is unambiguous only for tools with no exposed inputs."""
+        no_inputs = {tool["function"]["name"] for tool in tools
+                     if tool.get("type") == "function"
+                     and tool["function"].get("parameters", {}).get("type") == "object"
+                     and not tool["function"].get("parameters", {}).get("properties")
+                     and not tool["function"].get("parameters", {}).get("required")}
+        for choice in result.choices:
+            for call in choice.message.tool_calls or []:
+                raw = call.function.arguments
+                if call.function.name in no_inputs and (raw is None or (isinstance(raw, str) and not raw.strip())):
+                    call.function.arguments = "{}"
 
     def _persist(self, capability_id: str, output: str) -> None:
         assert self.workspace is not None
