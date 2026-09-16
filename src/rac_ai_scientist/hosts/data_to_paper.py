@@ -236,6 +236,10 @@ class DataToPaperBridge(HostBridge):
         interrupted = False
         try:
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                first_stage = self._stages_for(capability_id)[0]
+                if first_stage in self.runner.stages_to_conversations_lens:
+                    self.runner.reset_to_stage(first_stage)
+                    self.completed.difference_update(ORDER[ORDER.index(capability_id):])
                 for stage in self._stages_for(capability_id):
                     self.runner.advance_stage(stage)
                     returned = self.runner._run_stage(stage)

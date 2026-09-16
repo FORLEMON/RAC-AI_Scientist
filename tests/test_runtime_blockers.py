@@ -18,6 +18,20 @@ from rac_ai_scientist.artifacts import snapshot_workspace
 
 
 class RuntimeBlockersTests(unittest.TestCase):
+    def test_d2p_retry_resets_native_conversation_before_reentering(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bridge = bridge_for(Path(raw), None)
+            bridge.runner.stages_to_conversations_lens = {'code': 2}
+            events = []
+            bridge.runner.reset_to_stage = lambda stage: events.append(('reset', stage))
+            bridge.runner._run_stage = lambda stage: events.append(('run', stage))
+            bridge.completed.update({'data_exploration', 'research_goal', 'data_analysis', 'paper_writing'})
+            with patch.object(DataToPaperBridge, '_available_cards', return_value=[SimpleNamespace(capability_id='data_analysis', available=True)]), patch.object(DataToPaperBridge, '_stages_for', return_value=('code',)):
+                result = bridge.invoke('data_analysis', None)
+            self.assertIsNone(result.error)
+            self.assertEqual(events, [('reset', 'code'), ('run', 'code')])
+            self.assertNotIn('paper_writing', bridge.completed)
+
     def test_auto_exports_real_scope_and_literature_evidence(self):
         with tempfile.TemporaryDirectory() as raw:
             bridge = object.__new__(AutoResearchClawBridge)

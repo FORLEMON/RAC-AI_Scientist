@@ -12,6 +12,7 @@ from rac_ai_scientist.schemas import Budget
 class FakeRunner:
     def __init__(self, returned):
         self.returned = returned
+        self.stages_to_conversations_lens = {}
 
     def advance_stage(self, stage):
         pass
