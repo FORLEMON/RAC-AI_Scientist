@@ -104,16 +104,20 @@ class AIResearcherBridge(HostBridge):
         file_env.docker_workplace = str(self.workspace)
         self.client = MetaChain(log_path=str(native / "metachain.log"))
         self._install_tool_argument_adapter(self.client)
+        experiment_analysis = get_exp_analyser_agent(self.model, file_env=file_env, code_env=code_env)
+        evidence_tools = experiment_analysis.functions[:-1]
         self.agents = {
             "idea": get_idea_agent(self.model, file_env=file_env),
             "survey": get_survey_agent(self.model, file_env=file_env, code_env=code_env),
             "implementation_plan": get_coding_plan_agent(self.model, code_env=code_env),
             "implementation": get_ml_agent(self.model, code_env=code_env),
-            "experiment_analysis": get_exp_analyser_agent(self.model, file_env=file_env, code_env=code_env),
+            "experiment_analysis": experiment_analysis,
             "paper_writing": Agent(name="Paper Generation Agent", model=self.model,
-                instructions="Write a complete evidence-grounded scientific report from the current workspace. Do not invent results or citations."),
+                instructions="Use the read-only tools to inspect the current workspace, then write a complete evidence-grounded scientific report. Do not invent results or citations.",
+                functions=evidence_tools),
             "review": Agent(name="Paper Review Agent", model=self.model,
-                instructions="Review the supplied report against persisted evidence. Return Score: X/10 and actionable issues; do not revise the report."),
+                instructions="Use the read-only tools to review the supplied report against persisted evidence. Return Score: X/10 and actionable issues; do not revise the report.",
+                functions=evidence_tools),
         }
         self.context = {"working_dir": self.workspace.as_posix().lstrip("/"), "notes": [],
                         "innovative_idea": objective, "objective": objective}
@@ -225,7 +229,7 @@ class AIResearcherBridge(HostBridge):
                                if isinstance(item, dict) and item.get("role") == "error"]
             if provider_errors:
                 raise RuntimeError("; ".join(provider_errors))
-            output = "\n".join(str(item.get("content", "")) for item in response.messages if isinstance(item, dict))
+            output = self._response_output(capability_id, response.messages)
             self._persist(capability_id, output)
             self.completed.add(capability_id)
             if capability_id == "review":
@@ -247,6 +251,14 @@ class AIResearcherBridge(HostBridge):
             wall_seconds=time.monotonic() - started,
             cost_source="provider_response" if self.usage.cost_source == "provider_response" else "unavailable",
             token_source="provider_response"), error=error, proposed_done=proposed_done, metrics=metrics)
+
+    @staticmethod
+    def _response_output(capability_id: str, messages) -> str:
+        if capability_id in {"paper_writing", "review"}:
+            assistant = [str(item.get("content", "")) for item in messages
+                         if isinstance(item, dict) and item.get("role") == "assistant"]
+            return assistant[-1] if assistant else ""
+        return "\n".join(str(item.get("content", "")) for item in messages if isinstance(item, dict))
 
     @staticmethod
     def _install_tool_argument_adapter(client) -> None:

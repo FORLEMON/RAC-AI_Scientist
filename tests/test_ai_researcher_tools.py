@@ -9,6 +9,17 @@ from rac_ai_scientist.schemas import Usage
 
 
 class ToolArgumentTests(unittest.TestCase):
+    def test_paper_output_keeps_only_the_final_assistant_report(self):
+        messages = [
+            {'role': 'tool', 'content': 'outputs/metrics.json: score=0.81'},
+            {'role': 'assistant', 'content': '# Report\n\nThe measured score was 0.81.'},
+        ]
+
+        output = AIResearcherBridge._response_output('paper_writing', messages)
+
+        self.assertEqual(output, '# Report\n\nThe measured score was 0.81.')
+        self.assertNotIn('metrics.json:', output)
+
     def test_empty_encoding_is_normalized_only_for_zero_input_schema(self):
         calls = [SimpleNamespace(function=SimpleNamespace(name=name, arguments=raw))
                  for name, raw in [('page_down', ''), ('read', ''), ('unknown', ''), ('page_down', '{')]]
