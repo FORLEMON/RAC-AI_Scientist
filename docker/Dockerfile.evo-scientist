@@ -13,7 +13,7 @@ COPY src /opt/integration/src
 COPY configs /opt/integration/configs
 COPY upstream.lock.json /opt/integration/upstream.lock.json
 
-RUN python -m pip install --no-cache-dir -e /opt/host -e /opt/integration
+RUN python -m pip install --no-cache-dir -e /opt/host -e /opt/integration numpy scipy
 
 WORKDIR /opt/integration
 ENTRYPOINT ["rac-ai-scientist"]
