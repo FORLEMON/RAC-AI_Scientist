@@ -103,6 +103,7 @@ class AIResearcherBridge(HostBridge):
         file_env.local_workplace = str(self.workspace)
         file_env.docker_workplace = str(self.workspace)
         self.client = MetaChain(log_path=str(native / "metachain.log"))
+        self._install_tool_argument_adapter(self.client)
         self.agents = {
             "idea": get_idea_agent(self.model, file_env=file_env),
             "survey": get_survey_agent(self.model, file_env=file_env, code_env=code_env),
@@ -147,11 +148,26 @@ class AIResearcherBridge(HostBridge):
                 error = result.error
                 break
         report = self.workspace / "report" / "report.md"
-        complete = error is None and report.is_file() and bool(report.read_text(encoding="utf-8", errors="replace").strip())
+        report_text = report.read_text(encoding="utf-8", errors="replace").strip() if report.is_file() else ""
+        report_is_tool_request = (report_text.startswith("```json") and report_text.endswith("```")
+                                  and '"action"' in report_text)
+        code_files = sum(path.is_file() for path in (self.workspace / "code").rglob("*"))
+        result_files = sum(path.is_file() for path in (self.workspace / "outputs").rglob("*"))
+        complete = error is None and bool(report_text) and not report_is_tool_request and code_files > 0 and result_files > 0
+        if complete:
+            reason = "AI-Researcher native Level-1 sequence completed"
+        elif error:
+            reason = error
+        elif report_is_tool_request:
+            reason = "AI-Researcher returned a tool request instead of a report"
+        elif not report_text:
+            reason = "AI-Researcher returned without a report"
+        else:
+            reason = "AI-Researcher returned without code and experiment results"
         self.terminal = True
         return NativeRunResult(
-            status="completed" if complete else "stop",
-            reason="AI-Researcher native Level-1 sequence completed" if complete else (error or "AI-Researcher returned without a report"),
+            status="failed" if error else ("completed" if complete else "stop"),
+            reason=reason,
             native_iterations=iterations,
             artifacts_before=before,
             artifacts_after=snapshot_workspace(self.workspace),
@@ -164,7 +180,9 @@ class AIResearcherBridge(HostBridge):
                 cost_source=self.usage.cost_source,
                 token_source=self.usage.token_source,
             ),
-            native_status="completed" if complete else "stopped",
+            native_status="failed" if error else ("completed" if complete else "stopped"),
+            metrics={"code_files": code_files, "result_files": result_files,
+                     "report_is_tool_request": int(report_is_tool_request)},
         )
 
     def checkpoint(self) -> Checkpoint:
@@ -203,6 +221,10 @@ class AIResearcherBridge(HostBridge):
                 [{"role": "user", "content": prompt}], context_variables=self.context,
                 model_override=self.model, debug=False, max_turns=max(2, self.initial_budget.agent_calls - self.usage.agent_calls)))
             self.context.update(response.context_variables)
+            provider_errors = [item.get("content", "") for item in response.messages
+                               if isinstance(item, dict) and item.get("role") == "error"]
+            if provider_errors:
+                raise RuntimeError("; ".join(provider_errors))
             output = "\n".join(str(item.get("content", "")) for item in response.messages if isinstance(item, dict))
             self._persist(capability_id, output)
             self.completed.add(capability_id)
@@ -226,6 +248,40 @@ class AIResearcherBridge(HostBridge):
             cost_source="provider_response" if self.usage.cost_source == "provider_response" else "unavailable",
             token_source="provider_response"), error=error, proposed_done=proposed_done, metrics=metrics)
 
+    @staticmethod
+    def _install_tool_argument_adapter(client) -> None:
+        """Keep malformed external tool arguments out of native logging/execution."""
+        def validate(raw):
+            parsed = json.loads(raw)
+            if not isinstance(parsed, dict):
+                raise ValueError("tool arguments must be a JSON object")
+
+        original_format = client.logger._warp_args
+        def format_arguments(raw):
+            try:
+                validate(raw)
+            except (ValueError, TypeError):
+                return "<invalid JSON object; tool execution rejected>"
+            return original_format(raw)
+        client.logger._warp_args = format_arguments
+
+        original_handle = client.handle_tool_calls
+        def handle_tool_calls(tool_calls, *args, **kwargs):
+            valid, errors = [], []
+            for call in tool_calls:
+                try:
+                    validate(call.function.arguments)
+                except (ValueError, TypeError):
+                    errors.append({"role": "tool", "tool_call_id": call.id,
+                        "name": call.function.name,
+                        "content": "[Tool Call Error] Arguments must be a valid JSON object. Resend this tool call with corrected arguments."})
+                else:
+                    valid.append(call)
+            response = original_handle(valid, *args, **kwargs)
+            response.messages.extend(errors)
+            return response
+        client.handle_tool_calls = handle_tool_calls
+
     def _install_usage_adapter(self) -> None:
         import research_agent.inno.core as core
         bridge, original = self, core.acompletion
@@ -237,6 +293,7 @@ class AIResearcherBridge(HostBridge):
             kwargs["api_key"] = bridge.api_key
             kwargs["max_tokens"] = max(1, bridge.initial_budget.output_tokens - bridge.usage.output_tokens)
             result = await original(**kwargs)
+            bridge._normalize_empty_tool_arguments(result, kwargs.get("tools") or [])
             raw_usage = getattr(result, "usage", None)
             inp = int(getattr(raw_usage, "prompt_tokens", 0) or 0)
             out = int(getattr(raw_usage, "completion_tokens", 0) or 0)
@@ -248,6 +305,20 @@ class AIResearcherBridge(HostBridge):
                 "provider_response" if cost is not None else "unavailable", "provider_response")
             return result
         core.acompletion = completion
+
+    @staticmethod
+    def _normalize_empty_tool_arguments(result, tools) -> None:
+        """An empty encoding is unambiguous only for tools with no exposed inputs."""
+        no_inputs = {tool["function"]["name"] for tool in tools
+                     if tool.get("type") == "function"
+                     and tool["function"].get("parameters", {}).get("type") == "object"
+                     and not tool["function"].get("parameters", {}).get("properties")
+                     and not tool["function"].get("parameters", {}).get("required")}
+        for choice in result.choices:
+            for call in choice.message.tool_calls or []:
+                raw = call.function.arguments
+                if call.function.name in no_inputs and (raw is None or (isinstance(raw, str) and not raw.strip())):
+                    call.function.arguments = "{}"
 
     def _persist(self, capability_id: str, output: str) -> None:
         assert self.workspace is not None

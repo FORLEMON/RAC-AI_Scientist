@@ -133,6 +133,18 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(verification.verdict.value, "refuted")
         self.assertIn("invocation_error", [item.name for item in verification.checks])
 
+    def test_provider_http_402_stops_instead_of_rerouting(self):
+        policy = SharedPolicy(Condition.R5)
+        cp = checkpoint([Issue("I-1", "experiment", "needs code")])
+        decision = policy.decide(cp)
+        result = InvocationResult(
+            decision.capability_id or "", "", [], [],
+            error="ProviderStreamError: Error code: 402 - request limit reached",
+        )
+        evaluated = policy.evaluate(cp, decision, result)
+        self.assertIs(evaluated.action, Action.STOP)
+        self.assertIn("402", evaluated.reason)
+
     def test_verifier_rejects_undeclared_canonical_write(self):
         contract = SharedPolicy(Condition.R3).decide(checkpoint()).contract
         self.assertIsNotNone(contract)
