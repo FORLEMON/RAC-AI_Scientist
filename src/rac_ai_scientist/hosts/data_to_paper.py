@@ -238,6 +238,9 @@ class DataToPaperBridge(HostBridge):
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
                 first_stage = self._stages_for(capability_id)[0]
                 if first_stage in self.runner.stages_to_conversations_lens:
+                    self.runner.server_caller.file_path = str(
+                        self.runner.output_directory / self.runner.OPENAI_RESPONSES_FILENAME
+                    )
                     self.runner.reset_to_stage(first_stage)
                     self.completed.difference_update(ORDER[ORDER.index(capability_id):])
                 for stage in self._stages_for(capability_id):

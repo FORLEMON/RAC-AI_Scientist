@@ -22,14 +22,17 @@ class RuntimeBlockersTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             bridge = bridge_for(Path(raw), None)
             bridge.runner.stages_to_conversations_lens = {'code': 2}
+            bridge.runner.server_caller = SimpleNamespace(file_path=None)
+            bridge.runner.output_directory = Path(raw)
+            bridge.runner.OPENAI_RESPONSES_FILENAME = 'responses.json'
             events = []
-            bridge.runner.reset_to_stage = lambda stage: events.append(('reset', stage))
+            bridge.runner.reset_to_stage = lambda stage: events.append(('reset', stage, bridge.runner.server_caller.file_path))
             bridge.runner._run_stage = lambda stage: events.append(('run', stage))
             bridge.completed.update({'data_exploration', 'research_goal', 'data_analysis', 'paper_writing'})
             with patch.object(DataToPaperBridge, '_available_cards', return_value=[SimpleNamespace(capability_id='data_analysis', available=True)]), patch.object(DataToPaperBridge, '_stages_for', return_value=('code',)):
                 result = bridge.invoke('data_analysis', None)
             self.assertIsNone(result.error)
-            self.assertEqual(events, [('reset', 'code'), ('run', 'code')])
+            self.assertEqual(events, [('reset', 'code', str(Path(raw) / 'responses.json')), ('run', 'code')])
             self.assertNotIn('paper_writing', bridge.completed)
 
     def test_auto_exports_real_scope_and_literature_evidence(self):
