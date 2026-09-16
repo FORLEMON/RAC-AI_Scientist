@@ -68,6 +68,7 @@ class AgentLaboratoryContractNotesTests(unittest.TestCase):
             self.assertEqual(len(first), 2)
             self.assertIn("first pass", first[-1])
             self.assertIn("data/processed/**", first[-1])
+            self.assertIn("workspace-relative paths", first[-1])
             self.assertEqual(len(second), 2)
             self.assertIn("second pass", second[-1])
             self.assertNotIn("first pass", second[-1])
