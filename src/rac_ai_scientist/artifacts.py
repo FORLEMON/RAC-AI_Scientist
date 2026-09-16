@@ -27,7 +27,7 @@ def artifact_kind(relative: Path) -> str:
         return "terminal_report"
     if "review" in name:
         return "review"
-    if "literature" in name or "citation" in name:
+    if "literature" in name or "citation" in name or "survey" in name:
         return "literature"
     if "interpretation" in name or "analysis" in name:
         return "analysis"
