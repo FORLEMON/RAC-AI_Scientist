@@ -138,6 +138,7 @@ class AgentLaboratoryBridge(HostBridge):
         self.output_tokens = 0
         self.provider_cost_usd = 0.0
         self.cost_is_provider_reported = True
+        self._contract_note: dict[str, Any] | None = None
 
     def initialize(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
         if not (self.upstream / "ai_lab_repo.py").is_file():
@@ -296,6 +297,17 @@ class AgentLaboratoryBridge(HostBridge):
         proposed_done = False
         try:
             os.chdir(self.workspace)
+            if contract is not None:
+                if self._contract_note is None:
+                    self._contract_note = {"phases": [], "note": ""}
+                    self.workflow.notes.append(self._contract_note)
+                self._contract_note["phases"] = [NATIVE_NAMES[capability_id]]
+                self._contract_note["note"] = (
+                    f"Current RAC work contract objective: {contract.objective}\n"
+                    f"Read from: {', '.join(contract.readable_artifacts)}\n"
+                    f"Write only to: {', '.join(contract.writable_artifacts)}\n"
+                    f"Verify: {', '.join(item.kind for item in contract.required_evidence)}"
+                )
             method = getattr(self.workflow, METHODS[capability_id])
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
                 returned = method()
