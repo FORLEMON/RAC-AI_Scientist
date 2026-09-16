@@ -322,6 +322,9 @@ class AIResearcherBridge(HostBridge):
                 bridge.usage.input_tokens + inp, bridge.usage.output_tokens + out,
                 bridge.usage.agent_calls + 1, bridge.usage.wall_seconds,
                 "provider_response" if cost is not None else "unavailable", "provider_response")
+            if any(choice.finish_reason == "length" and not choice.message.content and not choice.message.tool_calls
+                   for choice in result.choices):
+                raise RuntimeError("model response exhausted output limit without text or tool call")
             return result
         core.acompletion = completion
 

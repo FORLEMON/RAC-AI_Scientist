@@ -179,6 +179,38 @@ class RuntimeBlockersTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Error code: 402'):
                 asyncio.run(core.acompletion())
 
+    def test_ai_empty_length_response_stops_after_recording_usage(self):
+        async def truncated(**kwargs):
+            return SimpleNamespace(
+                usage=SimpleNamespace(prompt_tokens=196160, completion_tokens=16384),
+                _hidden_params={},
+                choices=[SimpleNamespace(
+                    finish_reason='length',
+                    message=SimpleNamespace(content=None, tool_calls=None),
+                )],
+            )
+
+        core = ModuleType('research_agent.inno.core')
+        core.acompletion = truncated
+        research = ModuleType('research_agent')
+        inno = ModuleType('research_agent.inno')
+        research.inno, inno.core = inno, core
+        bridge = object.__new__(AIResearcherBridge)
+        bridge.initial_budget = Budget(20, 1_000_000, 100_000, 10, 100, 10)
+        bridge.usage = Usage()
+        bridge.model, bridge.api_key = 'fake', 'fake'
+        with patch.dict(sys.modules, {
+            'research_agent': research,
+            'research_agent.inno': inno,
+            'research_agent.inno.core': core,
+        }), patch.dict(os.environ, {'API_BASE_URL': 'http://localhost'}):
+            bridge._install_usage_adapter()
+            with self.assertRaisesRegex(RuntimeError, 'exhausted output limit'):
+                asyncio.run(core.acompletion())
+
+        self.assertEqual(bridge.usage.agent_calls, 1)
+        self.assertEqual(bridge.usage.output_tokens, 16384)
+
     def test_d2p_forward_stage_return_advances_past_skipped_phases(self):
         class Stage(Enum):
             GOAL = 1
