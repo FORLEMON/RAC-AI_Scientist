@@ -236,6 +236,20 @@ class AutoResearchClawBridge(HostBridge):
             (self.run_dir / "stage-14" / "analysis.md", self.workspace / "outputs" / "auto_research_claw" / "analysis.md"),
             (self.run_dir / "stage-18" / "reviews.md", self.workspace / "state" / "auto_research_claw" / "reviews.md"),
         ]
+        # Expose native scientific products, not stage health/decision receipts.
+        state_products = {
+            "stage-01/goal.md": "scope_goal.md",
+            "stage-02/problem_tree.md": "scope_plan.md",
+            "stage-03/search_plan.yaml": "literature_search_plan.yaml",
+            "stage-04/references.bib": "literature_references.bib",
+            "stage-05/shortlist.jsonl": "literature_shortlist.jsonl",
+            "stage-07/synthesis.md": "synthesis_analysis.md",
+            "stage-08/hypotheses.md": "hypotheses_plan.md",
+            "stage-09/exp_plan.yaml": "experiment_plan.yaml",
+        }
+        mappings.extend((self.run_dir / source,
+                         self.workspace / "state" / "auto_research_claw" / name)
+                        for source, name in state_products.items())
         for source, destination in mappings:
             if source.is_dir():
                 destination.mkdir(parents=True, exist_ok=True)

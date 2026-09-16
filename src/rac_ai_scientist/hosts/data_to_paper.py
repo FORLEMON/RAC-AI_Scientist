@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 import time
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -238,6 +239,17 @@ class DataToPaperBridge(HostBridge):
                 for stage in self._stages_for(capability_id):
                     self.runner.advance_stage(stage)
                     returned = self.runner._run_stage(stage)
+                    if isinstance(stage, Enum) and isinstance(returned, type(stage)):
+                        stages = list(type(stage))
+                        if stages.index(returned) > stages.index(stage):
+                            # Native stages return forward jumps when supplied
+                            # products make intervening work unnecessary.
+                            for candidate in ORDER:
+                                native_stages = self._stages_for(candidate)
+                                if native_stages and all(stages.index(s) < stages.index(returned) for s in native_stages):
+                                    self.completed.add(candidate)
+                            output.write(f"Native stage {stage.name} completed; next stage {returned.name}.\n")
+                            break
                     if returned not in (None, True):
                         # Record a native reset request as an unresolved state;
                         # the common policy decides the next invocation.
@@ -245,6 +257,7 @@ class DataToPaperBridge(HostBridge):
                         if returned is False:
                             error = "data-to-paper native stage terminated"
                         break
+                    output.write(f"Native stage {getattr(stage, 'name', stage)} completed.\n")
             self._persist_output(capability_id, output.getvalue())
             self._normalize_products()
             if not interrupted:

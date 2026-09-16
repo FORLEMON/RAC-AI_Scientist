@@ -166,7 +166,7 @@ class AIResearcherBridge(HostBridge):
             reason = "AI-Researcher returned without code and experiment results"
         self.terminal = True
         return NativeRunResult(
-            status="failed" if error else ("completed" if complete else "stop"),
+            status=("budget_exhausted" if error and "Error code: 402" in error else "failed") if error else ("completed" if complete else "stop"),
             reason=reason,
             native_iterations=iterations,
             artifacts_before=before,
@@ -287,12 +287,19 @@ class AIResearcherBridge(HostBridge):
         bridge, original = self, core.acompletion
         async def completion(**kwargs):
             if bridge.usage.agent_calls >= bridge.initial_budget.agent_calls:
-                raise RuntimeError("lifecycle agent-call budget exhausted")
+                raise RuntimeError("Error code: 402 - lifecycle agent-call budget exhausted")
             kwargs["model"] = bridge.model
             kwargs["base_url"] = os.environ["API_BASE_URL"]
             kwargs["api_key"] = bridge.api_key
             kwargs["max_tokens"] = max(1, bridge.initial_budget.output_tokens - bridge.usage.output_tokens)
-            result = await original(**kwargs)
+            try:
+                result = await original(**kwargs)
+            except Exception as exc:
+                if getattr(exc, "status_code", None) == 402:
+                    # MetaChain retries every APIError and then loses its status.
+                    # Use a non-retryable error before that native boundary.
+                    raise RuntimeError("Error code: 402 - model request budget exhausted") from exc
+                raise
             bridge._normalize_empty_tool_arguments(result, kwargs.get("tools") or [])
             raw_usage = getattr(result, "usage", None)
             inp = int(getattr(raw_usage, "prompt_tokens", 0) or 0)
