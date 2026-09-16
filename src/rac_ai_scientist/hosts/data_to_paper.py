@@ -39,6 +39,27 @@ REQUIRED_TAGS = {
 }
 
 
+def _write_data_descriptions(workspace: Path, objective: str, data_filenames: list[str]) -> None:
+    info = json.loads((workspace / "task.json").read_text(encoding="utf-8"))
+    declared = {
+        Path(item["path"]): str(item["description"])
+        for item in info.get("data", [])
+    }
+    basenames = [Path(relative).name for relative in data_filenames]
+    if len(basenames) != len(set(basenames)):
+        raise ValueError("data-to-paper requires unique data basenames for description files")
+    (workspace / "general_description.txt").write_text(objective, encoding="utf-8")
+    for relative in data_filenames:
+        path = Path(relative)
+        matches = [source for source in declared if source == path or source in path.parents]
+        if not matches:
+            raise ValueError(f"missing benchmark description for data file: {relative}")
+        source = max(matches, key=lambda item: len(item.parts))
+        (workspace / (path.name + ".description.txt")).write_text(
+            declared[source], encoding="utf-8"
+        )
+
+
 class DataToPaperBridge(HostBridge):
     """Thin bridge over data-to-paper's existing step runner and product store."""
 
@@ -105,6 +126,11 @@ class DataToPaperBridge(HostBridge):
             "excluded_citation_titles": [],
             "max_goal_refinement_iterations": 3,
         }
+        _write_data_descriptions(
+            self.workspace,
+            objective,
+            config["data_filenames"],
+        )
         (self.workspace / HypothesisTestingStepsRunner.PROJECT_PARAMETERS_FILENAME).write_text(
             json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"
         )
