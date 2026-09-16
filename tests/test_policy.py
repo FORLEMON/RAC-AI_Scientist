@@ -1,6 +1,8 @@
 import unittest
+from pathlib import Path
 
 from rac_ai_scientist.conditions import Condition
+from rac_ai_scientist.manifest import capability_cards, load_host_manifest
 from rac_ai_scientist.policy import SharedPolicy, verify_result
 from rac_ai_scientist.schemas import (
     Action,
@@ -49,6 +51,66 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(decision.capability_id, "run")
         self.assertIsNotNone(decision.contract)
         self.assertEqual(decision.contract.issue_ids, ("I-1",))
+
+    def test_native_requirement_prefers_named_capability_over_tag_tiebreak(self):
+        capabilities = [
+            CapabilityCard("researcher", "frame research", ("planning", "literature"), (), (), ("plan",)),
+            CapabilityCard("planner", "decompose review", ("planning",), (), (), ("plan",)),
+        ]
+        issue = Issue(
+            "native:researcher",
+            "native_requirement",
+            "initial research framing is incomplete",
+            required_tags=("planning",),
+        )
+        cp = Checkpoint("ep", 0, "answer", "researcher", [], [issue], budget(), capabilities)
+
+        for condition in (Condition.R1, Condition.R2, Condition.R3, Condition.R4, Condition.R5):
+            with self.subTest(condition=condition.value):
+                decision = SharedPolicy(condition).decide(cp)
+                self.assertEqual(decision.capability_id, "researcher")
+
+    def test_native_requirement_falls_back_to_tags_when_named_capability_is_unavailable(self):
+        issue = Issue(
+            "native:researcher",
+            "native_requirement",
+            "research capability is unavailable",
+            required_tags=("planning",),
+        )
+        cp = Checkpoint("ep", 0, "answer", "researcher", [], [issue], budget(), cards())
+        self.assertEqual(SharedPolicy(Condition.R1).decide(cp).capability_id, "plan")
+
+    def test_every_host_native_stage_keeps_its_named_capability_for_r1_through_r5(self):
+        host_configs = Path(__file__).resolve().parents[1] / "configs" / "hosts"
+        conditions = (Condition.R1, Condition.R2, Condition.R3, Condition.R4, Condition.R5)
+
+        for config_path in sorted(host_configs.glob("*.json")):
+            capabilities = capability_cards(load_host_manifest(config_path))
+            for card in capabilities:
+                issue = Issue(
+                    f"native:{card.capability_id}",
+                    "native_requirement",
+                    f"{card.capability_id} remains incomplete",
+                    required_tags=card.tags[:1],
+                )
+                cp = Checkpoint(
+                    "ep",
+                    0,
+                    "answer",
+                    card.capability_id,
+                    [],
+                    [issue],
+                    budget(),
+                    capabilities,
+                )
+                for condition in conditions:
+                    with self.subTest(
+                        host=config_path.stem,
+                        capability=card.capability_id,
+                        condition=condition.value,
+                    ):
+                        decision = SharedPolicy(condition).decide(cp)
+                        self.assertEqual(decision.capability_id, card.capability_id)
 
     def test_r4_recovers_changed_artifact_after_timeout(self):
         cp = checkpoint([Issue("I-1", "experiment", "missing baseline")])

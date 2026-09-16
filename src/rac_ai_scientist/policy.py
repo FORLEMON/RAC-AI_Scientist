@@ -119,6 +119,14 @@ class SharedPolicy:
         desired: list[str] = []
         if open_issues:
             issue = max(open_issues, key=lambda item: (item.attempts, item.issue_id))
+            if issue.kind == "native_requirement" and issue.issue_id.startswith("native:"):
+                native_capability_id = issue.issue_id.removeprefix("native:")
+                native_card = next(
+                    (card for card in cards if card.capability_id == native_capability_id),
+                    None,
+                )
+                if native_card is not None:
+                    return native_card
             desired.extend(issue.required_tags or ISSUE_TAGS.get(issue.kind, (issue.kind,)))
         else:
             has_report = any(item.kind == "terminal_report" for item in checkpoint.artifacts)
