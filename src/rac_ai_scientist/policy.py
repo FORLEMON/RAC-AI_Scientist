@@ -128,7 +128,10 @@ class SharedPolicy:
         for card in cards:
             score = sum(1 for tag in desired if tag in card.tags)
             scored.append((score, card.capability_id, card))
-        best = max(scored, key=lambda item: (item[0], -len(item[2].tags), item[1]))
+        best = max(scored, key=lambda item: (
+            item[0], item[2].capability_id == checkpoint.native_stage,
+            -len(item[2].tags), item[1],
+        ))
         if best[0] == 0:
             # A planner is the shared decomposition fallback, expressed as a tag.
             planners = [card for card in cards if "planning" in card.tags]

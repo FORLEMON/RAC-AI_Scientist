@@ -1,6 +1,8 @@
 import unittest
+from pathlib import Path
 
 from rac_ai_scientist.conditions import Condition
+from rac_ai_scientist.manifest import capability_cards, load_host_manifest
 from rac_ai_scientist.policy import SharedPolicy, verify_result
 from rac_ai_scientist.schemas import (
     Action,
@@ -96,3 +98,29 @@ class PolicyTests(unittest.TestCase):
         self.assertIs(policy.evaluate(cp, first, result).action, Action.REROUTE)
         rerouted = policy.decide(cp)
         self.assertNotEqual(rerouted.capability_id, first.capability_id)
+
+    def test_r5_equal_issue_match_keeps_current_native_experiment_stage(self):
+        manifest = load_host_manifest(
+            Path(__file__).resolve().parents[1] / "configs" / "hosts" / "agent_laboratory.json"
+        )
+        cp = Checkpoint(
+            "ep", 6, "run supplied experiment", "running_experiments", [],
+            [Issue("native:running_experiments", "native_requirement", "still running",
+                   required_tags=("experiment",))],
+            budget(), capability_cards(manifest),
+        )
+        self.assertEqual(SharedPolicy(Condition.R5).decide(cp).capability_id,
+                         "running_experiments")
+
+    def test_r5_stronger_methodology_match_still_allows_replanning(self):
+        manifest = load_host_manifest(
+            Path(__file__).resolve().parents[1] / "configs" / "hosts" / "agent_laboratory.json"
+        )
+        cp = Checkpoint(
+            "ep", 6, "revise flawed experiment", "running_experiments", [],
+            [Issue("methodology:experiment", "methodology", "plan must change",
+                   required_tags=("planning", "experiment"))],
+            budget(), capability_cards(manifest),
+        )
+        self.assertEqual(SharedPolicy(Condition.R5).decide(cp).capability_id,
+                         "plan_formulation")
