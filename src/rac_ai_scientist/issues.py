@@ -45,6 +45,8 @@ def parse_review_score(text: str) -> float | None:
     patterns = (
         r"Overall\s+Score\s*[：:]\s*(\d+(?:\.\d+)?)\s*/\s*10",
         r"score\s*[：:]\s*(\d+(?:\.\d+)?)\s*/\s*10",
+        r"Total(?:\s+Score)?\s*[：:=]\s*\**(\d+(?:\.\d+)?)\s*/\s*10",
+        r"\|\s*\**Total\**\s*\|\s*\**(\d+(?:\.\d+)?)\s*/\s*10",
     )
     for pattern in patterns:
         match = re.search(pattern, text, re.I)

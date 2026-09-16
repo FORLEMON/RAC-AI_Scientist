@@ -15,7 +15,7 @@ from ..bridge import HostBridge
 from ..issues import extract_review_issues, parse_review_score
 from ..manifest import capability_cards, load_host_manifest
 from ..reproducibility import seed_runtime
-from ..schemas import Budget, Checkpoint, InvocationResult, Issue, NativeRunResult, Usage, WorkContract
+from ..schemas import Budget, Checkpoint, CoordinationDecision, InvocationResult, Issue, NativeRunResult, Usage, WorkContract
 
 
 ORDER = ("researcher", "experimenter", "writer", "reviewer", "planner")
@@ -59,6 +59,7 @@ class ArkBridge(HostBridge):
         self.started = 0.0
         self.open_issues: list[Issue] = []
         self.native_mode = False
+        self._pending_transition: tuple[str, list[Issue]] | None = None
 
     def initialize(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
         self._initialize(episode_id=episode_id, workspace=workspace, objective=objective, seed=seed, native=False)
@@ -136,6 +137,7 @@ class ArkBridge(HostBridge):
             mode="paper",
         )
         self.started = time.monotonic()
+        self._pending_transition = None
         self.open_issues = [] if native else [Issue("native:researcher", "native_requirement", "initial research framing is incomplete", required_tags=("planning",))]
 
     def run_native(self) -> NativeRunResult:
@@ -216,6 +218,9 @@ class ArkBridge(HostBridge):
     def native_next(self, checkpoint: Checkpoint) -> str | None:
         return self.native_capability
 
+    def transaction_workspace(self) -> Path | None:
+        return self.workspace
+
     def invoke(self, capability_id: str, contract: WorkContract | None) -> InvocationResult:
         self._require_initialized()
         if capability_id not in {card.capability_id for card in self.cards}:
@@ -227,37 +232,63 @@ class ArkBridge(HostBridge):
         output = ""
         metrics: dict[str, float] = {}
         proposed_done = False
+        timed_out = False
+        next_issues: list[Issue] = []
+        next_capability = self._successor(capability_id)
+        prior_review = self._read_review() if capability_id == "reviewer" else ""
         try:
             prompt = render_contract_prompt(self.objective, capability_id, contract)
             if capability_id == "reviewer":
+                self._clear_rendered_pages()
                 try:
                     self.orchestrator.compile_latex()
                 except Exception:
                     pass
-            output = self.orchestrator.run_agent(capability_id, prompt, timeout=self._timeout())
-            self._persist_output(capability_id, output)
+            timeout = self._timeout()
+            output = self.orchestrator.run_agent(capability_id, prompt, timeout=timeout)
+            timed_out = not output.strip() and time.monotonic() - started >= max(1, timeout - 1)
             if capability_id == "reviewer":
-                score = parse_review_score(output)
+                review_text = self._review_text(output, previous=prior_review)
+                self._persist_output(capability_id, review_text)
+                score = parse_review_score(review_text)
                 if score is not None:
                     metrics["review_score"] = score
                     proposed_done = score >= 8.0
-                self.open_issues = extract_review_issues(output)
+                next_issues = extract_review_issues(review_text)
                 if score is None:
-                    self.open_issues.append(Issue("review:score_missing", "artifact", "review score is missing", required_tags=("terminal_review",)))
+                    next_issues.append(
+                        Issue(
+                            "review:score_missing",
+                            "artifact",
+                            "review score is missing; planner must turn the unstructured review into actionable work",
+                            required_tags=("planning",),
+                        )
+                    )
+                elif score < 8.0 and not next_issues:
+                    next_issues.append(
+                        Issue(
+                            "review:below_threshold",
+                            "methodology",
+                            f"review score {score:.1f}/10 is below the acceptance threshold",
+                            required_tags=("planning",),
+                        )
+                    )
             else:
-                self.open_issues = [
+                self._persist_output(capability_id, output)
+                next_issues = [
                     Issue(
-                        f"native:{self._successor(capability_id)}",
+                        f"native:{next_capability}",
                         "native_requirement",
-                        f"{self._successor(capability_id)} work remains",
-                        required_tags=REQUIRED_TAGS[self._successor(capability_id)],
+                        f"{next_capability} work remains",
+                        required_tags=REQUIRED_TAGS[next_capability],
                     )
                 ]
             if capability_id in {"writer", "reviewer"}:
                 self._normalize_report()
-            self.native_capability = self._successor(capability_id)
+            self._pending_transition = (next_capability, next_issues)
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
+            self._pending_transition = None
         self.hop += 1
         after = snapshot_workspace(self.workspace)
         usage_after = self._usage_totals()
@@ -275,10 +306,21 @@ class ArkBridge(HostBridge):
                 cost_source="host_estimate",
                 token_source="provider_response",
             ),
+            timed_out=timed_out,
             error=error,
+            proposed_next=capability_id if timed_out or not output.strip() else next_capability,
             proposed_done=proposed_done,
             metrics=metrics,
         )
+
+    def accept_invocation(self, result: InvocationResult, evaluation: CoordinationDecision) -> None:
+        if self._pending_transition is None:
+            return
+        self.native_capability, self.open_issues = self._pending_transition
+        self._pending_transition = None
+
+    def reject_invocation(self, result: InvocationResult, evaluation: CoordinationDecision) -> None:
+        self._pending_transition = None
 
     def _successor(self, capability_id: str) -> str:
         try:
@@ -300,6 +342,25 @@ class ArkBridge(HostBridge):
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(output or "", encoding="utf-8")
 
+    def _read_review(self) -> str:
+        assert self.workspace is not None
+        review = self.workspace / "auto_research" / "state" / "latest_review.md"
+        try:
+            return review.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeError):
+            return ""
+
+    def _review_text(self, fallback: str, *, previous: str | None = None) -> str:
+        text = self._read_review()
+        if text and (previous is None or text != previous):
+            return text
+        return fallback
+
+    def _clear_rendered_pages(self) -> None:
+        assert self.workspace is not None
+        for path in (self.workspace / "report").glob("page_*.png"):
+            path.unlink(missing_ok=True)
+
     def _normalize_report(self) -> None:
         assert self.workspace is not None
         source = self.workspace / "report" / "main.tex"
@@ -315,9 +376,11 @@ class ArkBridge(HostBridge):
         if "Work in progress." in source.read_text(encoding="utf-8"):
             return
         temporary = source.parent / ".report.md.tmp"
+        markdown_source = source.parent / ".report.source.tex"
         try:
+            markdown_source.write_text(self._markdown_latex_source(source), encoding="utf-8")
             subprocess.run(
-                ["pandoc", "--from=latex", "--to=gfm", "--wrap=none", f"--output={temporary.name}", source.name],
+                ["pandoc", "--from=latex", "--to=gfm", "--wrap=none", f"--output={temporary.name}", markdown_source.name],
                 cwd=source.parent,
                 check=True,
             )
@@ -326,6 +389,39 @@ class ArkBridge(HostBridge):
             temporary.replace(report)
         finally:
             temporary.unlink(missing_ok=True)
+            markdown_source.unlink(missing_ok=True)
+
+    @staticmethod
+    def _markdown_latex_source(source: Path) -> str:
+        text = source.read_text(encoding="utf-8")
+        bibliography = re.search(
+            r"\\begin\{thebibliography\}\{[^}]*\}(.*?)\\end\{thebibliography\}",
+            text,
+            re.S,
+        )
+        citation_numbers: dict[str, int] = {}
+        if bibliography:
+            for index, key in enumerate(re.findall(r"\\bibitem\{([^}]+)\}", bibliography.group(1)), start=1):
+                citation_numbers[key] = index
+
+            converted = re.sub(r"\\bibitem\{[^}]+\}", "\\\\item ", bibliography.group(1))
+            replacement = "\\section*{References}\n\\begin{enumerate}\n" + converted + "\n\\end{enumerate}"
+            text = text[: bibliography.start()] + replacement + text[bibliography.end() :]
+
+        def replace_citation(match: re.Match[str]) -> str:
+            keys = [item.strip() for item in match.group(1).split(",")]
+            labels = [str(citation_numbers.get(key, key)) for key in keys]
+            return "[" + ", ".join(labels) + "]"
+
+        text = re.sub(r"\\cite(?:\[[^]]*\])?\{([^}]+)\}", replace_citation, text)
+        aux = source.with_suffix(".aux")
+        if aux.is_file():
+            try:
+                labels = dict(re.findall(r"\\newlabel\{([^}]+)\}\{\{([^}]+)\}", aux.read_text(encoding="utf-8")))
+            except (OSError, UnicodeError):
+                labels = {}
+            text = re.sub(r"\\ref\{([^}]+)\}", lambda match: labels.get(match.group(1), match.group(1)), text)
+        return text
 
     def _usage_totals(self) -> Usage:
         stats = getattr(self.orchestrator, "_agent_stats", []) if self.orchestrator else []
@@ -424,5 +520,7 @@ def render_contract_prompt(objective: str, capability_id: str, contract: WorkCon
         f"Objective: {contract.objective}\nCapability: {capability_id}\n"
         f"Readable artifacts:\n{readable}\nWritable artifacts:\n{writable}\n"
         f"Required persisted evidence:\n{evidence}\n"
+        "Create, modify, or delete files only under the declared writable paths. "
+        "Any validation outside those paths must be strictly read-only.\n"
         "Do not claim completion unless the required evidence exists on disk."
     )

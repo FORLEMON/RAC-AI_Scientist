@@ -50,6 +50,16 @@ def materialize_rcb_workspace(task_dir: Path, destination: Path) -> dict:
         json.dumps({"task_id": task_id, "task": info.get("task", ""), "data": info.get("data", [])}, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+    data_items = "\n".join(f"- {item}" for item in info.get("data", [])) or "- See data/ for supplied inputs."
+    (destination / "INSTRUCTIONS.md").write_text(
+        "# Research task\n\n"
+        + str(info.get("task", "")).strip()
+        + "\n\n# Available inputs\n\n"
+        + data_items
+        + "\n\nUse only the visible task files, data/, and related_work/. "
+        "Persist executable analysis in code/, measurements in outputs/, and the final report in report/report.md.\n",
+        encoding="utf-8",
+    )
     if target.resolve() == destination or target.resolve() in destination.parents:
         raise BenchmarkBoundaryError("target_study leaked into episode workspace")
     return info

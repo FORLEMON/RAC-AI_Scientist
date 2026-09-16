@@ -1,10 +1,12 @@
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from rac_ai_scientist.hosts.ark import ArkBridge
+from rac_ai_scientist.schemas import Budget, CapabilityCard, CoordinationDecision, Action
 
 
 class ArkReportTests(unittest.TestCase):
@@ -77,6 +79,89 @@ class ArkReportTests(unittest.TestCase):
 
             self.assertEqual(existing.read_text(encoding="utf-8"), "# Previously valid report\n")
             self.assertFalse((report / ".report.md.tmp").exists())
+            self.assertFalse((report / ".report.source.tex").exists())
+
+    def test_markdown_source_preserves_citations_and_manual_bibliography(self):
+        with tempfile.TemporaryDirectory() as raw:
+            source = Path(raw) / "main.tex"
+            source.write_text(
+                "\\begin{document}\nEvidence~\\cite{paper_a,paper_b}.\n"
+                "\\begin{thebibliography}{9}\n"
+                "\\bibitem{paper_a} Author A. First paper.\n"
+                "\\bibitem{paper_b} Author B. Second paper.\n"
+                "\\end{thebibliography}\n\\end{document}\n",
+                encoding="utf-8",
+            )
+
+            converted = ArkBridge._markdown_latex_source(source)
+
+            self.assertIn("[1, 2]", converted)
+            self.assertIn("\\section*{References}", converted)
+            self.assertIn("\\item  Author A", converted)
+            self.assertNotIn("\\cite", converted)
+
+    def test_reviewer_reads_full_persisted_review(self):
+        with tempfile.TemporaryDirectory() as raw:
+            state = Path(raw) / "auto_research" / "state"
+            state.mkdir(parents=True)
+            (state / "latest_review.md").write_text("Total = 7.7 / 10", encoding="utf-8")
+            bridge = object.__new__(ArkBridge)
+            bridge.workspace = Path(raw)
+            self.assertEqual(bridge._review_text("summary only"), "Total = 7.7 / 10")
+            self.assertEqual(
+                bridge._review_text("new summary", previous="Total = 7.7 / 10"),
+                "new summary",
+            )
+
+    def test_stale_rendered_pages_are_removed_before_review(self):
+        with tempfile.TemporaryDirectory() as raw:
+            report = Path(raw) / "report"
+            report.mkdir()
+            (report / "page_01.png").write_bytes(b"one")
+            (report / "page_14.png").write_bytes(b"stale")
+            bridge = object.__new__(ArkBridge)
+            bridge.workspace = Path(raw)
+            bridge._clear_rendered_pages()
+            self.assertEqual(list(report.glob("page_*.png")), [])
+
+    def test_reviewer_transition_is_committed_only_after_acceptance(self):
+        class Orchestrator:
+            _agent_stats = []
+
+            def compile_latex(self):
+                pass
+
+            def run_agent(self, capability_id, prompt, timeout):
+                review = workspace / "auto_research" / "state" / "latest_review.md"
+                review.parent.mkdir(parents=True, exist_ok=True)
+                review.write_text(
+                    "Total = 7.7 / 10\nMajor issue: missing robustness analysis.",
+                    encoding="utf-8",
+                )
+                return "Saved full review to disk."
+
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            bridge = object.__new__(ArkBridge)
+            bridge.workspace = workspace
+            bridge.orchestrator = Orchestrator()
+            bridge.cards = [CapabilityCard("reviewer", "review", ("terminal_review",), (), ("state/**",), ("review",))]
+            bridge.initial_budget = Budget(10, 10000, 10000, 10, 100, 10)
+            bridge.started = time.monotonic()
+            bridge.objective = "review"
+            bridge.hop = 0
+            bridge.native_capability = "reviewer"
+            bridge.open_issues = []
+            bridge._pending_transition = None
+
+            result = bridge.invoke("reviewer", None)
+
+            self.assertEqual(result.metrics["review_score"], 7.7)
+            self.assertEqual(bridge.native_capability, "reviewer")
+            bridge.accept_invocation(result, CoordinationDecision(Action.REVERIFY, None, "accepted"))
+            self.assertEqual(bridge.native_capability, "planner")
+            self.assertTrue(bridge.open_issues)
+            self.assertNotIn("review:score_missing", [item.issue_id for item in bridge.open_issues])
 
 
 if __name__ == "__main__":

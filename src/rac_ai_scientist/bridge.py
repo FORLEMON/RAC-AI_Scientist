@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from .schemas import Checkpoint, InvocationResult, NativeRunResult, WorkContract
+from .schemas import Checkpoint, CoordinationDecision, InvocationResult, NativeRunResult, WorkContract
 
 
 class HostBridge(ABC):
@@ -39,6 +39,16 @@ class HostBridge(ABC):
     @abstractmethod
     def invoke(self, capability_id: str, contract: WorkContract | None) -> InvocationResult:
         """Invoke exactly one declared native capability."""
+
+    def transaction_workspace(self) -> Path | None:
+        """Opt into transactional artifact rollback for RAC invocations."""
+        return None
+
+    def accept_invocation(self, result: InvocationResult, evaluation: CoordinationDecision) -> None:
+        """Commit host-internal state after verification accepts an invocation."""
+
+    def reject_invocation(self, result: InvocationResult, evaluation: CoordinationDecision) -> None:
+        """Discard host-internal state after verification rejects an invocation."""
 
 
 class BridgeContractError(RuntimeError):

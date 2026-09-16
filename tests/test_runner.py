@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from rac_ai_scientist.artifacts import snapshot_workspace
 from rac_ai_scientist.bridge import HostBridge
 from rac_ai_scientist.ledger import JsonlLedger
 from rac_ai_scientist.runner import EpisodeRunner
@@ -96,3 +97,116 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(outcome.status, "budget_exhausted")
         self.assertEqual(outcome.hops, 1)
         self.assertIn("402", outcome.reason)
+
+    def test_refuted_invocation_is_rolled_back_before_retry(self):
+        class TransactionalBridge(HostBridge):
+            host_id = "transactional"
+
+            def __init__(self, workspace):
+                self.workspace = workspace
+                self.attempts = 0
+                self.done = False
+
+            def initialize(self, **kwargs):
+                pass
+
+            def checkpoint(self):
+                return Checkpoint(
+                    "ep",
+                    self.attempts,
+                    "write",
+                    "write",
+                    snapshot_workspace(self.workspace),
+                    [] if self.done else [Issue("native:write", "native_requirement", "write remains", required_tags=("writing",))],
+                    Budget(10, 10000, 10000, 10, 100, 10),
+                    [CapabilityCard("write", "write", ("writing", "finalize"), (), ("report/**",), ("terminal_report",))],
+                    terminal=self.done,
+                )
+
+            def native_next(self, checkpoint):
+                return "write"
+
+            def transaction_workspace(self):
+                return self.workspace
+
+            def invoke(self, capability_id, contract):
+                before = snapshot_workspace(self.workspace)
+                self.attempts += 1
+                report = self.workspace / "report" / "report.md"
+                report.parent.mkdir(parents=True, exist_ok=True)
+                report.write_text("valid report" * 40, encoding="utf-8")
+                if self.attempts == 1:
+                    (self.workspace / "unauthorized").write_text("bad", encoding="utf-8")
+                return InvocationResult(
+                    capability_id,
+                    "done",
+                    before,
+                    snapshot_workspace(self.workspace),
+                    proposed_done=True,
+                )
+
+            def accept_invocation(self, result, evaluation):
+                self.done = True
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            bridge = TransactionalBridge(root)
+            outcome = EpisodeRunner(bridge, "R5", JsonlLedger(root / "trace.jsonl")).run(hard_hop_limit=2)
+
+            self.assertEqual(outcome.status, "completed")
+            self.assertEqual(outcome.hops, 2)
+            self.assertFalse((root / "unauthorized").exists())
+            self.assertTrue((root / "report" / "report.md").is_file())
+
+    def test_recovery_retries_same_capability_without_consuming_control_hop(self):
+        class RecoveringBridge(HostBridge):
+            host_id = "recovering"
+
+            def __init__(self, workspace):
+                self.workspace = workspace
+                self.attempts = 0
+
+            def initialize(self, **kwargs):
+                pass
+
+            def checkpoint(self):
+                return Checkpoint(
+                    "ep",
+                    self.attempts,
+                    "run",
+                    "run",
+                    snapshot_workspace(self.workspace),
+                    [Issue("native:run", "native_requirement", "run remains", required_tags=("experiment",))],
+                    Budget(10, 10000, 10000, 10, 100, 10),
+                    [CapabilityCard("run", "run", ("experiment",), (), ("outputs/**",), ("result",))],
+                )
+
+            def native_next(self, checkpoint):
+                return "run"
+
+            def transaction_workspace(self):
+                return self.workspace
+
+            def invoke(self, capability_id, contract):
+                before = snapshot_workspace(self.workspace)
+                self.attempts += 1
+                output = self.workspace / "outputs" / "result.json"
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(f'{{"attempt": {self.attempts}}}', encoding="utf-8")
+                if self.attempts == 1:
+                    (self.workspace / "unauthorized").write_text("bad", encoding="utf-8")
+                    return InvocationResult(capability_id, "", before, snapshot_workspace(self.workspace), timed_out=True)
+                return InvocationResult(capability_id, "done", before, snapshot_workspace(self.workspace), proposed_done=True)
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            outcome = EpisodeRunner(
+                RecoveringBridge(root),
+                "R5",
+                JsonlLedger(root / "trace.jsonl"),
+            ).run(hard_hop_limit=2)
+
+            self.assertEqual(outcome.status, "completed")
+            self.assertEqual(outcome.hops, 2)
+            self.assertTrue((root / "outputs" / "result.json").is_file())
+            self.assertFalse((root / "unauthorized").exists())
