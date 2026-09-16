@@ -240,7 +240,8 @@ class AgentLaboratoryBridge(HostBridge):
         return (
             f"Work only inside {self.workspace}. Use the supplied data/ and related_work/. "
             "The hidden target study is unavailable and must not be sought. Persist code under code/, "
-            "results under outputs/, and the final ResearchClawBench report at report/report.md."
+            "results under outputs/, and the final ResearchClawBench report at report/report.md. "
+            "Saved code must use workspace-relative paths; never embed the episode path."
         )
 
     def checkpoint(self) -> Checkpoint:
@@ -306,7 +307,6 @@ class AgentLaboratoryBridge(HostBridge):
                     f"Current RAC work contract objective: {contract.objective}\n"
                     f"Read from: {', '.join(contract.readable_artifacts)}\n"
                     f"Write only to: {', '.join(contract.writable_artifacts)}\n"
-                    "Saved code must use workspace-relative paths; never embed the episode path.\n"
                     f"Verify: {', '.join(item.kind for item in contract.required_evidence)}"
                 )
             method = getattr(self.workflow, METHODS[capability_id])

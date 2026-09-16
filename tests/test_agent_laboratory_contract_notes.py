@@ -11,6 +11,14 @@ from rac_ai_scientist.schemas import Budget, EvidenceRequirement, WorkContract
 
 
 class AgentLaboratoryContractNotesTests(unittest.TestCase):
+    def test_benchmark_note_requires_portable_paths_for_all_policies(self):
+        bridge = object.__new__(AgentLaboratoryBridge)
+        bridge.workspace = Path("/workspace")
+
+        note = bridge._benchmark_note()
+
+        self.assertIn("workspace-relative paths", note)
+
     def test_native_agents_receive_current_contract_without_accumulating_retry_notes(self):
         class FakeWorkflow:
             def __init__(self):
@@ -46,6 +54,7 @@ class AgentLaboratoryContractNotesTests(unittest.TestCase):
             )
             bridge.workspace = workspace
             bridge.workflow = FakeWorkflow()
+            bridge.workflow.notes[0]["note"] = bridge._benchmark_note()
             bridge.started = time.monotonic()
             def contract(contract_id, objective):
                 return WorkContract(
@@ -64,11 +73,12 @@ class AgentLaboratoryContractNotesTests(unittest.TestCase):
                 self.assertIsNone(bridge.invoke("data_preparation", contract("hop2", "second pass")).error)
 
             native, first, second = bridge.workflow.seen
-            self.assertEqual(native, ["existing native note"])
+            self.assertEqual(len(native), 1)
+            self.assertIn("workspace-relative paths", native[0])
             self.assertEqual(len(first), 2)
             self.assertIn("first pass", first[-1])
             self.assertIn("data/processed/**", first[-1])
-            self.assertIn("workspace-relative paths", first[-1])
+            self.assertNotIn("workspace-relative paths", first[-1])
             self.assertEqual(len(second), 2)
             self.assertIn("second pass", second[-1])
             self.assertNotIn("first pass", second[-1])
