@@ -20,6 +20,20 @@ from rac_ai_scientist.artifacts import snapshot_workspace
 
 
 class RuntimeBlockersTests(unittest.TestCase):
+    def test_d2p_native_receipt_is_not_scientific_state_evidence(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bridge = object.__new__(DataToPaperBridge)
+            bridge.workspace = Path(raw)
+            bridge.runner = SimpleNamespace(products=SimpleNamespace(
+                get_paper_sections_without_citations=lambda: {}
+            ))
+
+            bridge._persist_output('paper_writing', 'Native stage completed.')
+            bridge._normalize_products()
+
+            self.assertEqual(snapshot_workspace(bridge.workspace), [])
+            self.assertTrue((bridge.workspace / '.rac/data_to_paper/paper_writing.txt').is_file())
+
     def test_auto_failed_stage_surfaces_native_error(self):
         class StageStatus(Enum):
             DONE = 'done'

@@ -386,7 +386,7 @@ class DataToPaperBridge(HostBridge):
 
     def _persist_output(self, capability_id: str, output: str) -> None:
         assert self.workspace is not None
-        destination = self.workspace / "state" / "data_to_paper" / f"{capability_id}.txt"
+        destination = self.workspace / ".rac" / "data_to_paper" / f"{capability_id}.txt"
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(output, encoding="utf-8")
 
