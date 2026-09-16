@@ -116,7 +116,6 @@ class ArkBridge(HostBridge):
             state = self.workspace / "auto_research" / "state"
             state.mkdir(parents=True, exist_ok=True)
             (state / "idea.md").write_text(objective, encoding="utf-8")
-            (state / "project_context.md").write_text(self._context_text(), encoding="utf-8")
         os.environ.setdefault("OPENAI_API_KEY", self.api_key)
         if os.environ.get("AGENT_API_BASE"):
             os.environ.setdefault("OPENAI_API_BASE", os.environ["AGENT_API_BASE"])
@@ -245,7 +244,10 @@ class ArkBridge(HostBridge):
                 except Exception:
                     pass
             timeout = self._timeout()
-            output = self.orchestrator.run_agent(capability_id, prompt, timeout=timeout)
+            if capability_id == "researcher" and not self._research_prompts_specialized():
+                output = self._run_native_research_specialization()
+            else:
+                output = self.orchestrator.run_agent(capability_id, prompt, timeout=timeout)
             timed_out = not output.strip() and time.monotonic() - started >= max(1, timeout - 1)
             if capability_id == "reviewer":
                 review_text = self._review_text(output, previous=prior_review)
@@ -341,6 +343,53 @@ class ArkBridge(HostBridge):
         destination = self.workspace / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(output or "", encoding="utf-8")
+
+    def _research_prompts_specialized(self) -> bool:
+        """Return whether ARK's native researcher initialized downstream prompts."""
+        assert self.workspace is not None
+        context = self.workspace / "auto_research" / "state" / "project_context.md"
+        agents = self.workspace / ".rac" / "ark_project" / "agents"
+        downstream = ("experimenter", "planner", "reviewer", "writer", "coder")
+        if not context.is_file() or context.stat().st_size == 0:
+            return False
+        return all(
+            (prompt := agents / f"{name}.prompt").is_file()
+            and "## Project-Specific Knowledge" in prompt.read_text(encoding="utf-8")
+            for name in downstream
+        )
+
+    def _run_native_research_specialization(self) -> str:
+        """Run ARK's native research compiler before RAC schedules later roles.
+
+        ARK's researcher owns proposal interpretation, project_context creation,
+        skill/citation bootstrap, and project-specific specialization of every
+        downstream role prompt.  Calling ``run_agent('researcher', ...)`` alone
+        bypasses those host semantics, so the RAC bridge exposes the complete
+        idempotent research phase as the first researcher capability invocation.
+        """
+        assert self.workspace is not None
+        research_phase = getattr(self.orchestrator, "_run_research_phase", None)
+        if not callable(research_phase):
+            raise RuntimeError("ARK orchestrator does not expose its native research phase")
+        research_phase()
+
+        # A resumed/partially initialized project may already have context while
+        # one or more prompt append operations were interrupted.  ARK's research
+        # phase skips specialization when project_context.md exists, so repair
+        # only the missing prompt specializations through its native idempotent
+        # helper before admitting the capability result.
+        if not self._research_prompts_specialized():
+            specialize = getattr(self.orchestrator, "_specialize_agent_prompts", None)
+            if callable(specialize):
+                specialize()
+        if not self._research_prompts_specialized():
+            raise RuntimeError("ARK researcher did not specialize every downstream agent prompt")
+
+        context = self.workspace / "auto_research" / "state" / "project_context.md"
+        return (
+            "ARK native research phase and downstream prompt specialization completed.\n\n"
+            + context.read_text(encoding="utf-8").strip()
+        )
 
     def _read_review(self) -> str:
         assert self.workspace is not None
@@ -488,10 +537,10 @@ class ArkBridge(HostBridge):
             "log_verbosity: normal\n"
             "intervention:\n  enabled: false\n"
             "artifact_store:\n  type: local\n"
+            f"research_idea: {json.dumps(self.objective, ensure_ascii=False)}\n"
         )
         if native:
             config += (
-                f"research_idea: {json.dumps(self.objective, ensure_ascii=False)}\n"
                 f"max_dev_iterations: {NATIVE_DEV_ITERATIONS}\n"
                 f"max_iterations: {NATIVE_REVIEW_ITERATIONS}\n"
             )
