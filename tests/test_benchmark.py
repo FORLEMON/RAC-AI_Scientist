@@ -22,6 +22,9 @@ class BenchmarkTests(unittest.TestCase):
             self.assertTrue((workspace / "data" / "x.csv").is_file())
             sanitized = json.loads((workspace / "task_info.json").read_text(encoding="utf-8"))
             self.assertEqual(sanitized["task_id"], "Demo_000")
+            instructions = (workspace / "INSTRUCTIONS.md").read_text(encoding="utf-8")
+            self.assertIn("demo", instructions)
+            self.assertNotIn("target_study", instructions)
             self.assertFalse((workspace / "target_study").exists())
             assert_no_target_study(workspace)
 

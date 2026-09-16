@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
+import tempfile
+from fnmatch import fnmatch
 from pathlib import Path
 
 from .schemas import ArtifactRecord
@@ -18,6 +21,19 @@ PRIVATE_TOP_LEVEL = {
     "evo_scientist_native",
     "auto_research_claw_native",
 }
+SYSTEM_SIDE_EFFECTS = {
+    "results/credentials_needed.json",
+    "results/environment_setup.json",
+    "results/setup_commands.log",
+}
+
+
+def _ignored_artifact(relative: Path) -> bool:
+    return bool(
+        IGNORED_PARTS.intersection(relative.parts)
+        or (relative.parts and relative.parts[0] in PRIVATE_TOP_LEVEL)
+        or relative.as_posix() in SYSTEM_SIDE_EFFECTS
+    )
 
 
 def artifact_kind(relative: Path) -> str:
@@ -49,7 +65,7 @@ def snapshot_workspace(workspace: Path) -> list[ArtifactRecord]:
         if not path.is_file():
             continue
         relative = path.relative_to(workspace)
-        if IGNORED_PARTS.intersection(relative.parts) or (relative.parts and relative.parts[0] in PRIVATE_TOP_LEVEL):
+        if _ignored_artifact(relative):
             continue
         digest = hashlib.sha256()
         try:
@@ -70,3 +86,75 @@ def snapshot_workspace(workspace: Path) -> list[ArtifactRecord]:
             )
         )
     return records
+
+
+class WorkspaceTransaction:
+    """File-level transaction for one capability invocation.
+
+    Generated environments and append-only host logs are deliberately outside
+    the transaction. Scientific artifacts and host state are restored when a
+    verifier rejects an invocation, so rejected work cannot contaminate later
+    phases.
+    """
+
+    _PERSISTENT_PATTERNS = (".conda_env/**", "auto_research/logs/**")
+
+    def __init__(self, workspace: Path | None):
+        self.workspace = workspace.resolve() if workspace is not None else None
+        self._temporary: tempfile.TemporaryDirectory[str] | None = None
+        self.backup: Path | None = None
+        if self.workspace is not None:
+            self._temporary = tempfile.TemporaryDirectory(prefix="rac-workspace-")
+            self.backup = Path(self._temporary.name) / "before"
+            self.backup.mkdir()
+            self._copy_tree(self.workspace, self.backup, skip_persistent=True)
+
+    @staticmethod
+    def _matches(relative: Path, patterns: tuple[str, ...]) -> bool:
+        posix = relative.as_posix()
+        return any(fnmatch(posix, pattern) for pattern in patterns)
+
+    def _copy_tree(self, source: Path, destination: Path, *, skip_persistent: bool = False) -> None:
+        for path in source.rglob("*"):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(source)
+            if skip_persistent and self._matches(relative, self._PERSISTENT_PATTERNS):
+                continue
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, target)
+
+    def rollback(self, *, preserve_patterns: tuple[str, ...] = ()) -> None:
+        if self.workspace is None or self.backup is None:
+            return
+        preserved_root = Path(self._temporary.name) / "preserved"  # type: ignore[union-attr]
+        preserved_root.mkdir()
+        for path in self.workspace.rglob("*"):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(self.workspace)
+            if self._matches(relative, preserve_patterns):
+                target = preserved_root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, target)
+
+        for path in sorted(self.workspace.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+            relative = path.relative_to(self.workspace)
+            if self._matches(relative, self._PERSISTENT_PATTERNS):
+                continue
+            if path.is_file() or path.is_symlink():
+                path.unlink(missing_ok=True)
+            elif path.is_dir():
+                try:
+                    path.rmdir()
+                except OSError:
+                    pass
+
+        self._copy_tree(self.backup, self.workspace)
+        self._copy_tree(preserved_root, self.workspace)
+
+    def close(self) -> None:
+        if self._temporary is not None:
+            self._temporary.cleanup()
+            self._temporary = None

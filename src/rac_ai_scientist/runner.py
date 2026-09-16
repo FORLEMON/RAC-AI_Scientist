@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .artifacts import WorkspaceTransaction
 from .bridge import HostBridge, validate_bridge_checkpoint
 from .conditions import Condition
 from .ledger import JsonlLedger
@@ -30,7 +31,8 @@ class EpisodeRunner:
         if hard_hop_limit <= 0:
             raise ValueError("hard_hop_limit must be positive")
         pending: CoordinationDecision | None = None
-        for hop in range(hard_hop_limit):
+        invocations = 0
+        while invocations < hard_hop_limit:
             checkpoint = self.bridge.checkpoint()
             validate_bridge_checkpoint(checkpoint)
             for issue in checkpoint.issues:
@@ -46,26 +48,46 @@ class EpisodeRunner:
                 decision = self.policy.decide(checkpoint, native_next=native)
             elif pending.action is Action.RETRY:
                 decision = pending
-            elif pending.action is Action.RECOVER:
-                pending = None
-                continue
             else:
                 decision = pending
 
-            self.ledger.append({"type": "decision", "hop": hop, "payload": decision})
+            self.ledger.append({"type": "decision", "hop": invocations, "payload": decision})
             if decision.action is Action.STOP and not checkpoint.terminal and checkpoint.remaining_budget.exhausted():
-                return EpisodeOutcome("budget_exhausted", hop, decision.reason)
+                return EpisodeOutcome("budget_exhausted", invocations, decision.reason)
             if decision.action in {Action.STOP, Action.ABSTAIN, Action.ESCALATE}:
-                return EpisodeOutcome(decision.action.value, hop, decision.reason)
+                return EpisodeOutcome(decision.action.value, invocations, decision.reason)
             if not decision.capability_id:
-                return EpisodeOutcome("invalid", hop, "decision did not name a capability")
+                return EpisodeOutcome("invalid", invocations, "decision did not name a capability")
 
-            result = self.bridge.invoke(decision.capability_id, decision.contract)
-            self.ledger.append({"type": "invocation", "hop": hop, "payload": result})
-            pending = self.policy.evaluate(checkpoint, decision, result)
-            self.ledger.append({"type": "evaluation", "hop": hop, "payload": pending})
-            if pending.action is Action.STOP:
+            transaction = WorkspaceTransaction(self.bridge.transaction_workspace())
+            try:
+                result = self.bridge.invoke(decision.capability_id, decision.contract)
+                self.ledger.append({"type": "invocation", "hop": invocations, "payload": result})
+                pending = self.policy.evaluate(checkpoint, decision, result)
+                self.ledger.append({"type": "evaluation", "hop": invocations, "payload": pending})
+                invocations += 1
+
+                if pending.action in {Action.RETRY, Action.REROUTE}:
+                    transaction.rollback()
+                    self.bridge.reject_invocation(result, pending)
+                elif pending.action is Action.RECOVER:
+                    writable = decision.contract.writable_artifacts if decision.contract is not None else ()
+                    transaction.rollback(preserve_patterns=writable)
+                    self.bridge.reject_invocation(result, pending)
+                    pending = None
+                elif result.error or result.timed_out:
+                    transaction.rollback()
+                    self.bridge.reject_invocation(result, pending)
+                else:
+                    self.bridge.accept_invocation(result, pending)
+            except Exception:
+                transaction.rollback()
+                raise
+            finally:
+                transaction.close()
+
+            if pending is not None and pending.action is Action.STOP:
                 if result.error or result.timed_out:
-                    return EpisodeOutcome("timed_out" if result.timed_out else "failed", hop + 1, pending.reason)
-                return EpisodeOutcome("completed", hop + 1, pending.reason)
-        return EpisodeOutcome("budget_exhausted", hard_hop_limit, "hard hop limit reached")
+                    return EpisodeOutcome("timed_out" if result.timed_out else "failed", invocations, pending.reason)
+                return EpisodeOutcome("completed", invocations, pending.reason)
+        return EpisodeOutcome("budget_exhausted", invocations, "hard hop limit reached")
