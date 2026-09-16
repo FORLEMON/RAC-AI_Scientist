@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import time
 import unittest
 from enum import Enum
 from pathlib import Path
@@ -19,6 +20,55 @@ from rac_ai_scientist.artifacts import snapshot_workspace
 
 
 class RuntimeBlockersTests(unittest.TestCase):
+    def test_auto_failed_stage_surfaces_native_error(self):
+        class StageStatus(Enum):
+            DONE = 'done'
+            FAILED = 'failed'
+            PAUSED = 'paused'
+
+        for terminal_status in (StageStatus.FAILED, StageStatus.PAUSED):
+            with self.subTest(status=terminal_status.value):
+                def execute_stage(stage, **kwargs):
+                    if stage == 9:
+                        return SimpleNamespace(stage=SimpleNamespace(name='EXPERIMENT_DESIGN'),
+                                               status=StageStatus.DONE, error=None)
+                    return SimpleNamespace(stage=SimpleNamespace(name='CODE_GENERATION'),
+                                           status=terminal_status,
+                                           error='topic-experiment misalignment')
+
+                executor = ModuleType('researchclaw.pipeline.executor')
+                executor.execute_stage = execute_stage
+                stages = ModuleType('researchclaw.pipeline.stages')
+                stages.Stage = lambda value: value
+                stages.StageStatus = StageStatus
+                pipeline = ModuleType('researchclaw.pipeline')
+                researchclaw = ModuleType('researchclaw')
+                researchclaw.pipeline = pipeline
+
+                with tempfile.TemporaryDirectory() as raw, patch.dict(sys.modules, {
+                    'researchclaw': researchclaw,
+                    'researchclaw.pipeline': pipeline,
+                    'researchclaw.pipeline.executor': executor,
+                    'researchclaw.pipeline.stages': stages,
+                }):
+                    bridge = object.__new__(AutoResearchClawBridge)
+                    bridge.workspace = Path(raw)
+                    bridge.run_dir = Path(raw) / 'auto_research_claw_native'
+                    bridge.run_dir.mkdir()
+                    bridge.config = bridge.adapters = object()
+                    bridge.episode_id = 'episode'
+                    bridge.completed = set()
+                    bridge.usage = Usage()
+                    bridge.started = time.monotonic()
+                    bridge.hop = 0
+                    bridge.terminal = False
+                    bridge._available_cards = lambda: [SimpleNamespace(capability_id='design', available=True)]
+                    with patch.object(bridge, '_normalize_products'):
+                        result = bridge.invoke('design', None)
+
+                self.assertIn('topic-experiment misalignment', result.error)
+                self.assertNotIn('design', bridge.completed)
+
     def test_d2p_writing_exports_sections_and_compile_keeps_report_gate(self):
         with tempfile.TemporaryDirectory() as raw:
             bridge = object.__new__(DataToPaperBridge)

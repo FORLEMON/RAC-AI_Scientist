@@ -174,6 +174,8 @@ class AutoResearchClawBridge(HostBridge):
                     auto_approve_gates=True)
                 results.append(result)
                 if result.status != StageStatus.DONE:
+                    detail = f": {result.error}" if result.error else ""
+                    error = f"native stage {result.stage.name} {result.status.value}{detail}"
                     break
             output = "\n".join(f"{r.stage.name}: {r.status.value}{': ' + r.error if r.error else ''}" for r in results)
             if results and all(r.status.value == "done" for r in results):
