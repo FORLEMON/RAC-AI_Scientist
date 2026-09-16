@@ -6,6 +6,20 @@ from rac_ai_scientist.artifacts import snapshot_workspace
 
 
 class ArtifactTests(unittest.TestCase):
+    def test_snapshot_ignores_generated_conda_environment(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            generated = root / ".conda_env" / "lib" / "python" / "site-packages"
+            generated.mkdir(parents=True)
+            (generated / "numpy.py").write_text("generated dependency", encoding="utf-8")
+            outputs = root / "outputs"
+            outputs.mkdir()
+            (outputs / "result.json").write_text("{}", encoding="utf-8")
+
+            records = snapshot_workspace(root)
+
+            self.assertEqual([item.relative_path for item in records], ["outputs/result.json"])
+
     def test_snapshot_classifies_terminal_report_and_is_stable(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

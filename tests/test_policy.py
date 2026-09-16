@@ -80,6 +80,32 @@ class PolicyTests(unittest.TestCase):
         cp = Checkpoint("ep", 0, "answer", "researcher", [], [issue], budget(), cards())
         self.assertEqual(SharedPolicy(Condition.R1).decide(cp).capability_id, "plan")
 
+    def test_ark_experimenter_contract_allows_generated_report_figures(self):
+        config = Path(__file__).resolve().parents[1] / "configs" / "hosts" / "ark.json"
+        capabilities = capability_cards(load_host_manifest(config))
+        issue = Issue(
+            "native:experimenter",
+            "native_requirement",
+            "experimenter work remains",
+            required_tags=("experiment",),
+        )
+        cp = Checkpoint("ep", 1, "answer", "experimenter", [], [issue], budget(), capabilities)
+        decision = SharedPolicy(Condition.R5).decide(cp)
+        self.assertEqual(decision.capability_id, "experimenter")
+        self.assertIsNotNone(decision.contract)
+
+        result = InvocationResult(
+            "experimenter",
+            "completed experiment",
+            [],
+            [
+                ArtifactRecord("result", "outputs/result.json", "result", "new-result", 20),
+                ArtifactRecord("figure", "report/images/result.pdf", "figure", "new-figure", 20),
+            ],
+        )
+        verification = verify_result(decision.contract, result)
+        self.assertEqual(verification.verdict.value, "supported")
+
     def test_every_host_native_stage_keeps_its_named_capability_for_r1_through_r5(self):
         host_configs = Path(__file__).resolve().parents[1] / "configs" / "hosts"
         conditions = (Condition.R1, Condition.R2, Condition.R3, Condition.R4, Condition.R5)
