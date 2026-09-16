@@ -233,6 +233,8 @@ class AutoResearchClawBridge(HostBridge):
         assert self.workspace is not None and self.run_dir is not None
         mappings = [
             (self.run_dir / "stage-10" / "experiment", self.workspace / "code" / "auto_research_claw"),
+            (self.run_dir / "stage-12" / "runs", self.workspace / "outputs" / "auto_research_claw"),
+            (self.run_dir / "stage-13" / "experiment_final", self.workspace / "code" / "auto_research_claw"),
             (self.run_dir / "stage-14" / "analysis.md", self.workspace / "outputs" / "auto_research_claw" / "analysis.md"),
             (self.run_dir / "stage-18" / "reviews.md", self.workspace / "state" / "auto_research_claw" / "reviews.md"),
         ]
@@ -280,7 +282,7 @@ class AutoResearchClawBridge(HostBridge):
         if not path.is_file(): return None
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            value = data.get("score", data.get("overall_score"))
+            value = data.get("score_1_to_10")
             return float(value) if value is not None else None
         except (OSError, ValueError, TypeError, json.JSONDecodeError): return None
 

@@ -9,6 +9,7 @@ from types import SimpleNamespace, ModuleType
 from unittest.mock import patch
 
 from rac_ai_scientist.artifacts import artifact_kind
+from rac_ai_scientist.manifest import capability_cards, load_host_manifest
 from rac_ai_scientist.hosts.ai_researcher import AIResearcherBridge
 from rac_ai_scientist.schemas import Budget, Usage
 from test_data_to_paper_native_reset import bridge_for
@@ -18,6 +19,23 @@ from rac_ai_scientist.artifacts import snapshot_workspace
 
 
 class RuntimeBlockersTests(unittest.TestCase):
+    def test_d2p_writing_exports_sections_and_compile_keeps_report_gate(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bridge = object.__new__(DataToPaperBridge)
+            bridge.workspace = Path(raw)
+            bridge.runner = SimpleNamespace(products=SimpleNamespace(
+                get_paper_sections_without_citations=lambda: {'methods': 'Method text', 'results': 'Result text'}
+            ))
+            bridge._normalize_products()
+            draft = bridge.workspace / 'state/data_to_paper/paper_sections.md'
+            self.assertIn('# methods\n\nMethod text', draft.read_text())
+        manifest = load_host_manifest(Path(__file__).parents[1] / 'configs/hosts/data_to_paper.json')
+        cards = {card.capability_id: card for card in capability_cards(manifest)}
+        self.assertNotIn('finalize', cards['paper_writing'].tags)
+        self.assertEqual(cards['paper_writing'].produces, ('state',))
+        self.assertIn('finalize', cards['compile'].tags)
+        self.assertEqual(cards['compile'].produces, ('terminal_report',))
+
     def test_d2p_retry_resets_native_conversation_before_reentering(self):
         with tempfile.TemporaryDirectory() as raw:
             bridge = bridge_for(Path(raw), None)
@@ -47,6 +65,32 @@ class RuntimeBlockersTests(unittest.TestCase):
             bridge._normalize_products()
             artifacts = snapshot_workspace(bridge.workspace)
             self.assertEqual({a.kind for a in artifacts}, {'plan', 'literature'})
+
+    def test_auto_exports_machine_results_and_final_experiment_code(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bridge = object.__new__(AutoResearchClawBridge)
+            bridge.workspace = Path(raw)
+            bridge.run_dir = Path(raw) / 'auto_research_claw_native'
+            for name, content in [
+                ('stage-10/experiment/analysis.py', 'draft'),
+                ('stage-12/runs/results.json', '{"score": 1}'),
+                ('stage-13/experiment_final/analysis.py', 'final'),
+            ]:
+                path = bridge.run_dir / name
+                path.parent.mkdir(parents=True)
+                path.write_text(content)
+            bridge._normalize_products()
+            self.assertEqual((bridge.workspace / 'code/auto_research_claw/analysis.py').read_text(), 'final')
+            self.assertEqual((bridge.workspace / 'outputs/auto_research_claw/results.json').read_text(), '{"score": 1}')
+
+    def test_auto_reads_the_native_quality_score_field(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bridge = object.__new__(AutoResearchClawBridge)
+            bridge.run_dir = Path(raw)
+            report = bridge.run_dir / 'stage-20/quality_report.json'
+            report.parent.mkdir(parents=True)
+            report.write_text('{"score_1_to_10": 7.5, "score": 99}')
+            self.assertEqual(bridge._quality_score(), 7.5)
 
     def test_literature_review_is_literature_not_terminal_review(self):
         self.assertEqual(artifact_kind(Path('state/agent_laboratory/literature_review.txt')), 'literature')

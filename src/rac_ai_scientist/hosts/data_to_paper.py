@@ -375,6 +375,14 @@ class DataToPaperBridge(HostBridge):
                 continue
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, destination)
+        sections = self.runner.products.get_paper_sections_without_citations()
+        if sections:
+            destination = self.workspace / "state" / "data_to_paper" / "paper_sections.md"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                "\n\n".join(f"# {name}\n\n{content}" for name, content in sections.items()),
+                encoding="utf-8",
+            )
 
     def _persist_output(self, capability_id: str, output: str) -> None:
         assert self.workspace is not None

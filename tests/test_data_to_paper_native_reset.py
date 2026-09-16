@@ -13,6 +13,7 @@ class FakeRunner:
     def __init__(self, returned):
         self.returned = returned
         self.stages_to_conversations_lens = {}
+        self.products = SimpleNamespace(get_paper_sections_without_citations=lambda: {})
 
     def advance_stage(self, stage):
         pass
