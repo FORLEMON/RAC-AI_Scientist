@@ -3,7 +3,7 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH=/opt/conda/bin:/root/.local/bin:$PATH \
+    PATH=/root/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/conda/bin \
     RAC_HOST_ROOT=/opt/host \
     CONDA_EXE=/opt/conda/bin/conda \
     CONDA_NOTICES_DISABLED=true
