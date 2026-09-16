@@ -10,6 +10,7 @@ from rac_ai_scientist.cli import _execute_episode, _uses_host_native_n0
 from rac_ai_scientist.hosts.ark import (
     NATIVE_DEV_ITERATIONS,
     NATIVE_REVIEW_ITERATIONS,
+    SUCCESSORS,
     ArkBridge,
 )
 from rac_ai_scientist.hosts.agent_laboratory import AgentLaboratoryBridge
@@ -76,6 +77,17 @@ class NativeOnlyBridge:
 
 
 class ArkNativeN0Tests(unittest.TestCase):
+    def test_every_ark_capability_has_an_explicit_successor(self):
+        manifest = Path(__file__).resolve().parents[1] / "configs" / "hosts" / "ark.json"
+        capability_ids = {
+            item["capability_id"]
+            for item in json.loads(manifest.read_text(encoding="utf-8"))["capabilities"]
+        }
+        self.assertEqual(set(SUCCESSORS), capability_ids)
+
+        bridge = object.__new__(ArkBridge)
+        self.assertEqual(bridge._successor("coder"), "writer")
+
     def test_all_n0_conditions_select_host_native_execution(self):
         for host in (
             "ark", "agent_laboratory", "data_to_paper", "ai_researcher",

@@ -19,6 +19,14 @@ from ..schemas import Budget, Checkpoint, InvocationResult, Issue, NativeRunResu
 
 
 ORDER = ("researcher", "experimenter", "writer", "reviewer", "planner")
+SUCCESSORS = {
+    "researcher": "experimenter",
+    "experimenter": "writer",
+    "coder": "writer",
+    "writer": "reviewer",
+    "reviewer": "planner",
+    "planner": "experimenter",
+}
 NATIVE_DEV_ITERATIONS = 3
 NATIVE_REVIEW_ITERATIONS = 3
 REQUIRED_TAGS = {
@@ -273,12 +281,10 @@ class ArkBridge(HostBridge):
         )
 
     def _successor(self, capability_id: str) -> str:
-        if capability_id == "reviewer":
-            return "planner"
-        if capability_id == "planner":
-            return "experimenter"
-        index = ORDER.index(capability_id)
-        return ORDER[min(index + 1, len(ORDER) - 1)]
+        try:
+            return SUCCESSORS[capability_id]
+        except KeyError as exc:
+            raise ValueError(f"ARK capability has no declared successor: {capability_id}") from exc
 
     def _persist_output(self, capability_id: str, output: str) -> None:
         assert self.workspace is not None
