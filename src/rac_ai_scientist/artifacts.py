@@ -6,7 +6,7 @@ from pathlib import Path
 from .schemas import ArtifactRecord
 
 
-IGNORED_PARTS = {".git", "__pycache__", ".pytest_cache", ".venv"}
+IGNORED_PARTS = {".git", "__pycache__", ".pytest_cache", ".venv", ".conda_env"}
 PRIVATE_TOP_LEVEL = {
     ".ark",
     ".rac",
