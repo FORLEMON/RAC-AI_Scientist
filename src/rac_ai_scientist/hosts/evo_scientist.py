@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import time
@@ -96,7 +97,8 @@ class EvoScientistBridge(HostBridge):
         )
         os.environ["CUSTOM_OPENAI_API_KEY"] = self.api_key
         os.environ["CUSTOM_OPENAI_BASE_URL"] = base_url
-        chat_model = get_chat_model(model=self.model, provider="custom-openai")
+        model_options = {"profile": {"pdf_inputs": False}} if "deepseek" in self.model.lower() else {}
+        chat_model = get_chat_model(model=self.model, provider="custom-openai", **model_options)
         self.agent = create_cli_agent(
             workspace_dir=str(self.workspace), config=cfg, chat_model=chat_model
         )
@@ -119,10 +121,7 @@ class EvoScientistBridge(HostBridge):
             "Run real analyses where feasible, preserve code in code/ and results in outputs/, and write the final "
             "self-contained Markdown paper to report/report.md. Continue until the report is evidence-grounded and complete."
         )
-        result = self.agent.invoke(
-            {"messages": [{"role": "user", "content": prompt}]},
-            config={"configurable": {"thread_id": self.episode_id}},
-        )
+        result = self._invoke_agent(prompt)
         messages = result.get("messages", []) if isinstance(result, dict) else []
         self._collect_usage(messages)
         output = _message_text(messages[-1]) if messages else str(result)
@@ -185,10 +184,7 @@ class EvoScientistBridge(HostBridge):
         metrics: dict[str, float] = {}
         try:
             prompt = self._prompt(capability_id, contract)
-            result = self.agent.invoke(
-                {"messages": [{"role": "user", "content": prompt}]},
-                config={"configurable": {"thread_id": self.episode_id}},
-            )
+            result = self._invoke_agent(prompt)
             messages = result.get("messages", []) if isinstance(result, dict) else []
             output = _message_text(messages[-1]) if messages else str(result)
             self._collect_usage(messages)
@@ -215,6 +211,19 @@ class EvoScientistBridge(HostBridge):
                 wall_seconds=time.monotonic() - started,
                 cost_source="unavailable", token_source="provider_response",
             ), error=error, proposed_done=proposed_done, metrics=metrics)
+
+    def _invoke_agent(self, prompt: str):
+        from EvoScientist.middleware.code_interpreter import aclose_code_interpreters
+
+        try:
+            return self.agent.invoke(
+                {"messages": [{"role": "user", "content": prompt}]},
+                config={"configurable": {"thread_id": self.episode_id}},
+            )
+        finally:
+            # Provider errors skip native after-agent hooks. Close QuickJS workers
+            # while Python can still service their event loops, not during GC.
+            asyncio.run(aclose_code_interpreters())
 
     def _prompt(self, capability_id: str, contract: WorkContract | None) -> str:
         base = render_contract_prompt(self.objective, capability_id, contract)

@@ -87,6 +87,8 @@ class EpisodeRunner:
                 transaction.close()
 
             if pending is not None and pending.action is Action.STOP:
+                if result.error and "Error code: 402" in result.error:
+                    return EpisodeOutcome("budget_exhausted", invocations, pending.reason)
                 if result.error or result.timed_out:
                     return EpisodeOutcome("timed_out" if result.timed_out else "failed", invocations, pending.reason)
                 return EpisodeOutcome("completed", invocations, pending.reason)

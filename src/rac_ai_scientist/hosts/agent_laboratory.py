@@ -39,6 +39,81 @@ REQUIRED_TAGS = {
 }
 
 
+class _ArxivTimedSession:
+    def __init__(self, inner):
+        self.inner = inner
+
+    def get(self, url, **kwargs):
+        return self.inner.get(url, timeout=(5, 30), **kwargs)
+
+
+def _install_arxiv_transport() -> None:
+    """Bound Agent Laboratory's pinned arxiv.py transport and surface search failures."""
+    import arxiv
+    from tools import ArxivSearch
+
+    original_init = arxiv.Client.__init__
+    if not getattr(original_init, "_rac_deadline", False):
+        def init(client, *args, **kwargs):
+            original_init(client, *args, **kwargs)
+            client.num_retries = 0  # The native search tool already retries three times.
+            client._session = _ArxivTimedSession(client._session)
+
+        init._rac_deadline = True
+        arxiv.Client.__init__ = init
+
+    original_search = ArxivSearch.find_papers_by_str
+    if not getattr(original_search, "_rac_error", False):
+        def find_papers_by_str(search, query, N=20):
+            papers = original_search(search, query, N)
+            if papers is None:
+                raise RuntimeError("arXiv API search failed after native retries")
+            return papers
+
+        find_papers_by_str._rac_error = True
+        ArxivSearch.find_papers_by_str = find_papers_by_str
+
+
+def _install_hf_data_search(workspace: Path) -> None:
+    """Return the supplied benchmark inputs instead of searching external datasets."""
+    import ai_lab_repo
+
+    data = workspace / "data"
+    paths = sorted(path.relative_to(workspace).as_posix() for path in data.iterdir()) if data.is_dir() else []
+    notice = (
+        "External Hugging Face dataset search is disabled for this benchmark. "
+        "Read task.json and use only the supplied local data paths: "
+        + ", ".join(repr(path) for path in paths)
+    )
+
+    class SuppliedDataSearch:
+        def retrieve_ds(self, query):
+            return []
+
+        def results_str(self, datasets):
+            return [notice]
+
+    ai_lab_repo.HFDataSearch = SuppliedDataSearch
+
+
+def _install_report_writing_scope() -> None:
+    """Supply the globals incorrectly referenced by the pinned report writer."""
+    import ai_lab_repo
+
+    original = ai_lab_repo.LaboratoryWorkflow.report_writing
+    if getattr(original, "_rac_report_scope", False):
+        return
+
+    def report_writing(workflow):
+        # ponytail: pinned upstream uses module globals; remove when its self.* fix is locked.
+        original.__globals__["research_topic"] = workflow.research_topic
+        original.__globals__["compile_pdf"] = workflow.compile_pdf
+        return original(workflow)
+
+    report_writing._rac_report_scope = True
+    ai_lab_repo.LaboratoryWorkflow.report_writing = report_writing
+
+
 class AgentLaboratoryBridge(HostBridge):
     """Thin state/invocation bridge over Agent Laboratory's existing phase methods."""
 
@@ -63,6 +138,7 @@ class AgentLaboratoryBridge(HostBridge):
         self.output_tokens = 0
         self.provider_cost_usd = 0.0
         self.cost_is_provider_reported = True
+        self._contract_note: dict[str, Any] | None = None
 
     def initialize(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
         if not (self.upstream / "ai_lab_repo.py").is_file():
@@ -86,6 +162,9 @@ class AgentLaboratoryBridge(HostBridge):
             os.chdir(self.workspace)
             from ai_lab_repo import LaboratoryWorkflow
 
+            _install_arxiv_transport()
+            _install_hf_data_search(self.workspace)
+            _install_report_writing_scope()
             self._install_model_adapter()
 
             models = {native: self.model for native in NATIVE_NAMES.values()}
@@ -106,7 +185,7 @@ class AgentLaboratoryBridge(HostBridge):
                 paper_index=0,
                 except_if_fail=True,
                 parallelized=False,
-                lab_dir=str(lab_dir),
+                lab_dir=lab_dir.name,
                 lab_index=0,
                 agentRxiv=False,
             )
@@ -161,7 +240,8 @@ class AgentLaboratoryBridge(HostBridge):
         return (
             f"Work only inside {self.workspace}. Use the supplied data/ and related_work/. "
             "The hidden target study is unavailable and must not be sought. Persist code under code/, "
-            "results under outputs/, and the final ResearchClawBench report at report/report.md."
+            "results under outputs/, and the final ResearchClawBench report at report/report.md. "
+            "Saved code must use workspace-relative paths; never embed the episode path."
         )
 
     def checkpoint(self) -> Checkpoint:
@@ -218,6 +298,17 @@ class AgentLaboratoryBridge(HostBridge):
         proposed_done = False
         try:
             os.chdir(self.workspace)
+            if contract is not None:
+                if self._contract_note is None:
+                    self._contract_note = {"phases": [], "note": ""}
+                    self.workflow.notes.append(self._contract_note)
+                self._contract_note["phases"] = [NATIVE_NAMES[capability_id]]
+                self._contract_note["note"] = (
+                    f"Current RAC work contract objective: {contract.objective}\n"
+                    f"Read from: {', '.join(contract.readable_artifacts)}\n"
+                    f"Write only to: {', '.join(contract.writable_artifacts)}\n"
+                    f"Verify: {', '.join(item.kind for item in contract.required_evidence)}"
+                )
             method = getattr(self.workflow, METHODS[capability_id])
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
                 returned = method()

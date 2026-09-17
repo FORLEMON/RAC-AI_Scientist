@@ -30,6 +30,16 @@ class ArtifactTests(unittest.TestCase):
             self.assertEqual(first, second)
             self.assertEqual(first[0].kind, "terminal_report")
 
+    def test_snapshot_classifies_survey_as_literature(self):
+        with tempfile.TemporaryDirectory() as raw:
+            survey = Path(raw) / "state" / "ai_researcher" / "survey.md"
+            survey.parent.mkdir(parents=True)
+            survey.write_text("literature review", encoding="utf-8")
+
+            records = snapshot_workspace(Path(raw))
+
+            self.assertEqual(records[0].kind, "literature")
+
     def test_snapshot_ignores_openhands_environment_bookkeeping(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

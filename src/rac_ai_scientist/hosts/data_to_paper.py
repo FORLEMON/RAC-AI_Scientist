@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 import time
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,27 @@ REQUIRED_TAGS = {
     "paper_writing": ("writing",),
     "compile": ("finalize",),
 }
+
+
+def _write_data_descriptions(workspace: Path, objective: str, data_filenames: list[str]) -> None:
+    info = json.loads((workspace / "task.json").read_text(encoding="utf-8"))
+    declared = {
+        Path(item["path"]): str(item["description"])
+        for item in info.get("data", [])
+    }
+    basenames = [Path(relative).name for relative in data_filenames]
+    if len(basenames) != len(set(basenames)):
+        raise ValueError("data-to-paper requires unique data basenames for description files")
+    (workspace / "general_description.txt").write_text(objective, encoding="utf-8")
+    for relative in data_filenames:
+        path = Path(relative)
+        matches = [source for source in declared if source == path or source in path.parents]
+        if not matches:
+            raise ValueError(f"missing benchmark description for data file: {relative}")
+        source = max(matches, key=lambda item: len(item.parts))
+        (workspace / (path.name + ".description.txt")).write_text(
+            declared[source], encoding="utf-8"
+        )
 
 
 class DataToPaperBridge(HostBridge):
@@ -105,6 +127,11 @@ class DataToPaperBridge(HostBridge):
             "excluded_citation_titles": [],
             "max_goal_refinement_iterations": 3,
         }
+        _write_data_descriptions(
+            self.workspace,
+            objective,
+            config["data_filenames"],
+        )
         (self.workspace / HypothesisTestingStepsRunner.PROJECT_PARAMETERS_FILENAME).write_text(
             json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"
         )
@@ -206,21 +233,51 @@ class DataToPaperBridge(HostBridge):
         error = None
         started = time.monotonic()
         proposed_done = False
+        interrupted = False
         try:
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                first_stage = self._stages_for(capability_id)[0]
+                if first_stage in self.runner.stages_to_conversations_lens:
+                    self.runner.server_caller.file_path = str(
+                        self.runner.output_directory / self.runner.OPENAI_RESPONSES_FILENAME
+                    )
+                    self.runner.reset_to_stage(first_stage)
+                    self.completed.difference_update(ORDER[ORDER.index(capability_id):])
                 for stage in self._stages_for(capability_id):
                     self.runner.advance_stage(stage)
                     returned = self.runner._run_stage(stage)
+                    if isinstance(stage, Enum) and isinstance(returned, type(stage)):
+                        stages = list(type(stage))
+                        if stages.index(returned) > stages.index(stage):
+                            # Native stages return forward jumps when supplied
+                            # products make intervening work unnecessary.
+                            for candidate in ORDER:
+                                native_stages = self._stages_for(candidate)
+                                if native_stages and all(stages.index(s) < stages.index(returned) for s in native_stages):
+                                    self.completed.add(candidate)
+                            output.write(f"Native stage {stage.name} completed; next stage {returned.name}.\n")
+                            break
                     if returned not in (None, True):
                         # Record a native reset request as an unresolved state;
                         # the common policy decides the next invocation.
+                        interrupted = True
+                        if returned is False:
+                            error = "data-to-paper native stage terminated"
                         break
-            self.completed.add(capability_id)
-            if capability_id == "compile":
-                self.terminal = True
-                proposed_done = True
+                    output.write(f"Native stage {getattr(stage, 'name', stage)} completed.\n")
             self._persist_output(capability_id, output.getvalue())
             self._normalize_products()
+            if not interrupted:
+                if capability_id == "compile":
+                    report = self.workspace / "report" / "report.md"
+                    if report.is_file() and report.read_text(encoding="utf-8", errors="replace").strip():
+                        self.completed.add(capability_id)
+                        self.terminal = True
+                        proposed_done = True
+                    else:
+                        error = "data-to-paper compile produced no report"
+                else:
+                    self.completed.add(capability_id)
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
         self.hop += 1
@@ -318,10 +375,18 @@ class DataToPaperBridge(HostBridge):
                 continue
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, destination)
+        sections = self.runner.products.get_paper_sections_without_citations()
+        if sections:
+            destination = self.workspace / "state" / "data_to_paper" / "paper_sections.md"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                "\n\n".join(f"# {name}\n\n{content}" for name, content in sections.items()),
+                encoding="utf-8",
+            )
 
     def _persist_output(self, capability_id: str, output: str) -> None:
         assert self.workspace is not None
-        destination = self.workspace / "state" / "data_to_paper" / f"{capability_id}.txt"
+        destination = self.workspace / ".rac" / "data_to_paper" / f"{capability_id}.txt"
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(output, encoding="utf-8")
 

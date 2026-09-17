@@ -3,12 +3,24 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH=/root/.local/bin:$PATH \
-    RAC_HOST_ROOT=/opt/host
+    PATH=/root/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/conda/bin \
+    RAC_HOST_ROOT=/opt/host \
+    CONDA_EXE=/opt/conda/bin/conda \
+    CONDA_NOTICES_DISABLED=true
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential git pandoc texlive-latex-base texlive-latex-extra texlive-fonts-recommended \
     && rm -rf /var/lib/apt/lists/*
+
+ADD https://github.com/conda-forge/miniforge/releases/download/26.7.2-0/Miniforge3-Linux-x86_64.sh /tmp/miniforge.sh
+RUN bash /tmp/miniforge.sh -b -p /opt/conda \
+    && rm /tmp/miniforge.sh \
+    && /opt/conda/bin/conda create -y -n ark-base \
+       python=3.11 pip pyyaml numpy scipy pandas matplotlib seaborn scikit-learn \
+    && printf '%s\n' /usr/local/lib/python3.11/site-packages \
+       > /opt/conda/envs/ark-base/lib/python3.11/site-packages/system-site-packages.pth \
+    && chmod -R a+rX /opt/conda \
+    && chmod -R a+rwX /opt/conda/pkgs
 
 COPY --from=host . /opt/host
 COPY pyproject.toml README.md LICENSE /opt/integration/

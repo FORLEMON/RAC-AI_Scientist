@@ -82,6 +82,22 @@ class RunnerTests(unittest.TestCase):
             outcome = EpisodeRunner(ExhaustedBridge(), "N0", JsonlLedger(Path(raw) / "trace.jsonl")).run(hard_hop_limit=2)
         self.assertEqual(outcome.status, "budget_exhausted")
 
+    def test_provider_http_402_is_a_terminal_budget_result(self):
+        class BudgetRejectedBridge(FakeBridge):
+            def invoke(self, capability_id, contract):
+                return InvocationResult(
+                    capability_id, "", [], [],
+                    error="ProviderStreamError: Error code: 402 - request limit reached",
+                )
+
+        with tempfile.TemporaryDirectory() as raw:
+            outcome = EpisodeRunner(
+                BudgetRejectedBridge(), "R5", JsonlLedger(Path(raw) / "trace.jsonl")
+            ).run(hard_hop_limit=10)
+        self.assertEqual(outcome.status, "budget_exhausted")
+        self.assertEqual(outcome.hops, 1)
+        self.assertIn("402", outcome.reason)
+
     def test_refuted_invocation_is_rolled_back_before_retry(self):
         class TransactionalBridge(HostBridge):
             host_id = "transactional"
