@@ -97,7 +97,8 @@ class EvoScientistBridge(HostBridge):
         )
         os.environ["CUSTOM_OPENAI_API_KEY"] = self.api_key
         os.environ["CUSTOM_OPENAI_BASE_URL"] = base_url
-        chat_model = get_chat_model(model=self.model, provider="custom-openai")
+        model_options = {"profile": {"pdf_inputs": False}} if "deepseek" in self.model.lower() else {}
+        chat_model = get_chat_model(model=self.model, provider="custom-openai", **model_options)
         self.agent = create_cli_agent(
             workspace_dir=str(self.workspace), config=cfg, chat_model=chat_model
         )
