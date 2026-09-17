@@ -17,7 +17,7 @@
       "local_snapshot": "ARK",
       "tree_sha256": "c324eb1092069a03afd137eb460d96dd131b9676a4b1b2ad8eb8bca807410f25",
       "snapshot_tree_sha256": "f38fd735a45f7b484c5fdad12b48fe2b148ac2b55cac64a545307c85ee8a14bd",
-      "runtime_tree_sha256": "dde0f04b46898763daebf96414dcb06de6284e68afcb8f6678488ff7beeced63",
+      "runtime_tree_sha256": "82e3c9a86d444e8450924e99b02264288f58fdfcf6e5e300aec517e3e79ef77c",
       "license": "Apache-2.0"
     },
     "agent_laboratory": {
