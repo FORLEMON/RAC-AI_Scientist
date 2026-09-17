@@ -72,6 +72,8 @@ class RuntimeBlockersTests(unittest.TestCase):
                     bridge.config = bridge.adapters = object()
                     bridge.episode_id = 'episode'
                     bridge.completed = set()
+                    bridge.rollback_stage = None
+                    bridge.decision_attempts = 0
                     bridge.usage = Usage()
                     bridge.started = time.monotonic()
                     bridge.hop = 0
@@ -180,13 +182,19 @@ class RuntimeBlockersTests(unittest.TestCase):
                 asyncio.run(core.acompletion())
 
     def test_ai_empty_length_response_stops_after_recording_usage(self):
+        self.check_ai_empty_length_response(None)
+
+    def test_ai_whitespace_length_response_stops_after_recording_usage(self):
+        self.check_ai_empty_length_response(' \n\t ')
+
+    def check_ai_empty_length_response(self, content):
         async def truncated(**kwargs):
             return SimpleNamespace(
                 usage=SimpleNamespace(prompt_tokens=196160, completion_tokens=16384),
                 _hidden_params={},
                 choices=[SimpleNamespace(
                     finish_reason='length',
-                    message=SimpleNamespace(content=None, tool_calls=None),
+                    message=SimpleNamespace(content=content, tool_calls=None),
                 )],
             )
 

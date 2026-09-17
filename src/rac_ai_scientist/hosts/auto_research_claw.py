@@ -53,6 +53,8 @@ class AutoResearchClawBridge(HostBridge):
         self.terminal = False
         self.usage = Usage()
         self.open_issues: list[Issue] = []
+        self.rollback_stage: int | None = None
+        self.decision_attempts = 0
 
     def initialize(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
         if not (self.upstream / "researchclaw" / "pipeline" / "runner.py").is_file():
@@ -167,6 +169,8 @@ class AutoResearchClawBridge(HostBridge):
             from researchclaw.pipeline.executor import execute_stage
             from researchclaw.pipeline.stages import Stage, StageStatus
             first, last = STAGE_RANGES[capability_id]
+            if self.rollback_stage is not None and first <= self.rollback_stage <= last:
+                first = self.rollback_stage
             results = []
             for stage_number in range(first, last + 1):
                 result = execute_stage(Stage(stage_number), run_dir=self.run_dir,
@@ -177,10 +181,48 @@ class AutoResearchClawBridge(HostBridge):
                     detail = f": {result.error}" if result.error else ""
                     error = f"native stage {result.stage.name} {result.status.value}{detail}"
                     break
+                if (stage_number == 14 and self.config.experiment.repair.enabled
+                    and self.config.experiment.mode not in {"collider_agent", "biology_agent", "stat_agent"}):
+                    from researchclaw.pipeline.runner import _run_experiment_diagnosis, _run_experiment_repair
+                    _run_experiment_diagnosis(self.run_dir, self.config, self.episode_id)
+                    diagnosis = self.run_dir / "experiment_diagnosis.json"
+                    if diagnosis.is_file() and json.loads(diagnosis.read_text(encoding="utf-8")).get("repair_needed"):
+                        _run_experiment_repair(self.run_dir, self.config, self.episode_id)
             output = "\n".join(f"{r.stage.name}: {r.status.value}{': ' + r.error if r.error else ''}" for r in results)
+            self._normalize_products()
             if results and all(r.status.value == "done" for r in results):
                 self.completed.add(capability_id)
-            self._normalize_products()
+                if self.rollback_stage is not None and first <= self.rollback_stage <= last:
+                    self.rollback_stage = None
+                    self.open_issues = []
+                if capability_id == "analysis":
+                    from researchclaw.pipeline.stages import DECISION_ROLLBACK, MAX_DECISION_PIVOTS
+                    decision = results[-1].decision
+                    if decision in DECISION_ROLLBACK:
+                        from researchclaw.pipeline.runner import (
+                            _consecutive_empty_metrics, _promote_best_stage14,
+                            _record_decision_history, _version_rollback_stages,
+                        )
+                        target = DECISION_ROLLBACK[decision]
+                        target_id = next(name for name, (start, end) in STAGE_RANGES.items() if start <= int(target) <= end)
+                        if self.decision_attempts >= MAX_DECISION_PIVOTS or (
+                            self.decision_attempts > 0 and _consecutive_empty_metrics(self.run_dir, self.decision_attempts)
+                        ):
+                            _promote_best_stage14(self.run_dir, self.config)
+                            self._normalize_products()
+                            self.open_issues = []
+                            output += f"\nNative {decision} limit reached: proceeding under the native bounded rollback policy"
+                        else:
+                            self.completed.difference_update(ORDER[ORDER.index(target_id):])
+                            self.open_issues = [Issue(f"native:{target_id}", "native_requirement",
+                                f"Native research decision requires {decision}: return to {target.name}",
+                                required_tags=REQUIRED_TAGS[target_id])]
+                            self.decision_attempts += 1
+                            _record_decision_history(self.run_dir, decision, target, self.decision_attempts)
+                            _version_rollback_stages(self.run_dir, target, self.decision_attempts)
+                            self.rollback_stage = int(target)
+                    else:
+                        self.open_issues = []
             if capability_id in {"writing", "finalize"}:
                 review = self._review_text()
                 self.open_issues = extract_review_issues(review)
@@ -290,7 +332,9 @@ class AutoResearchClawBridge(HostBridge):
 
     def _available_cards(self):
         idx = ORDER.index(self._next_native()) if not self.terminal else len(ORDER)
-        return [replace(c, available=ORDER.index(c.capability_id) <= min(idx + 1, len(ORDER) - 1)) for c in self.cards]
+        return [replace(c, available=ORDER.index(c.capability_id) <= min(idx + (self.rollback_stage is None), len(ORDER) - 1)
+                        and (c.capability_id not in {"writing", "finalize"} or "analysis" in self.completed))
+                for c in self.cards]
 
     def _next_native(self) -> str:
         return next((item for item in ORDER if item not in self.completed), "finalize")
