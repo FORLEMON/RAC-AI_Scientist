@@ -10,6 +10,18 @@ from rac_ai_scientist.schemas import Budget, CapabilityCard, CoordinationDecisio
 
 
 class ArkReportTests(unittest.TestCase):
+    def test_markdown_export_removes_only_ark_page_count_probe(self):
+        marker = (r"\makeatletter\pdfsavepos\write\@auxout{\string\gdef\string\arkBodyEndY{\the\pdflastypos}"
+                  r"\string\gdef\string\arkPageH{\number\pdfpageheight}"
+                  r"\string\gdef\string\arkBodyEndPage{\arabic{page}}}\makeatother")
+        original = "\\section{Results}\nMeasured result.\n" + marker + "\n\\clearpage\n\\bibliography{references}\n"
+        with tempfile.TemporaryDirectory() as raw:
+            source = Path(raw) / "main.tex"
+            source.write_text(original, encoding="utf-8")
+            converted = ArkBridge._markdown_latex_source(source)
+            self.assertEqual(converted, original.replace(marker, ""))
+            self.assertEqual(source.read_text(encoding="utf-8"), original)
+
     def test_placeholder_tex_does_not_become_a_terminal_report(self):
         with tempfile.TemporaryDirectory() as raw:
             report = Path(raw) / "report"

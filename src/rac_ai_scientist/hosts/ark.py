@@ -500,6 +500,15 @@ class ArkBridge(HostBridge):
     @staticmethod
     def _markdown_latex_source(source: Path) -> str:
         text = source.read_text(encoding="utf-8")
+        # ARK's PDF page-count probe is layout instrumentation, not report content.
+        body_end_marker = (
+            r"\makeatletter\pdfsavepos"
+            r"\write\@auxout{\string\gdef\string\arkBodyEndY{\the\pdflastypos}"
+            r"\string\gdef\string\arkPageH{\number\pdfpageheight}"
+            r"\string\gdef\string\arkBodyEndPage{\arabic{page}}}"
+            r"\makeatother"
+        )
+        text = text.replace(body_end_marker, "")
         bibliography = re.search(
             r"\\begin\{thebibliography\}\{[^}]*\}(.*?)\\end\{thebibliography\}",
             text,
