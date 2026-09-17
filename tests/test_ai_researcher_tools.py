@@ -32,6 +32,7 @@ class ToolArgumentTests(unittest.TestCase):
                       'reference_codebases': []}]
             survey = '# Survey\nGaussian-process calibration with measured data.'
             async def run(agent, messages, **kwargs):
+                self.assertNotIn('max_turns', kwargs)  # Native max_turns counts messages, not API calls.
                 if agent == 'survey':
                     self.assertEqual(kwargs['context_variables']['notes'], [])
                     self.assertIn('Research proposal', messages[0]['content'])

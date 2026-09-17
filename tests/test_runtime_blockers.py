@@ -184,6 +184,30 @@ class RuntimeBlockersTests(unittest.TestCase):
     def test_ai_empty_length_response_stops_after_recording_usage(self):
         self.check_ai_empty_length_response(None)
 
+    def test_ai_request_budget_stops_before_another_provider_call(self):
+        calls = []
+        async def provider(**kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(usage=SimpleNamespace(prompt_tokens=10, completion_tokens=2),
+                _hidden_params={}, choices=[SimpleNamespace(finish_reason='stop',
+                message=SimpleNamespace(content='done', tool_calls=None))])
+        core = ModuleType('research_agent.inno.core')
+        core.acompletion = provider
+        research, inno = ModuleType('research_agent'), ModuleType('research_agent.inno')
+        research.inno, inno.core = inno, core
+        bridge = object.__new__(AIResearcherBridge)
+        bridge.initial_budget = Budget(25, 1000, 1000, 1, 100, 10)
+        bridge.usage = Usage()
+        bridge.model, bridge.api_key = 'fake', 'fake'
+        with patch.dict(sys.modules, {'research_agent': research, 'research_agent.inno': inno,
+                'research_agent.inno.core': core}), patch.dict(os.environ, {'API_BASE_URL': 'http://localhost'}):
+            bridge._install_usage_adapter()
+            asyncio.run(core.acompletion())
+            with self.assertRaisesRegex(RuntimeError, '402.*agent-call budget'):
+                asyncio.run(core.acompletion())
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(bridge.usage.agent_calls, 1)
+
     def test_ai_whitespace_length_response_stops_after_recording_usage(self):
         self.check_ai_empty_length_response(' \n\t ')
 

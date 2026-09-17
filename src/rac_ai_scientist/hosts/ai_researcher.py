@@ -238,7 +238,7 @@ class AIResearcherBridge(HostBridge):
                 prompt += "\nReport to review:\n" + (report.read_text(encoding="utf-8", errors="replace") if report.is_file() else "[missing]")
             response = asyncio.run(self.client.run_async(self.agents[capability_id],
                 [{"role": "user", "content": prompt}], context_variables=self.context,
-                model_override=self.model, debug=False, max_turns=max(2, self.initial_budget.agent_calls - self.usage.agent_calls)))
+                model_override=self.model, debug=False))
             provider_errors = [item.get("content", "") for item in response.messages
                                if isinstance(item, dict) and item.get("role") == "error"]
             if provider_errors:
