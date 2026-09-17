@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from .conditions import Condition
 from .schemas import Checkpoint, CoordinationDecision, InvocationResult, NativeRunResult, WorkContract
 
 
@@ -10,6 +11,9 @@ class HostBridge(ABC):
     """Policy-free interface implemented by every AI-scientist host."""
 
     host_id: str
+
+    def configure_condition(self, condition: Condition | str) -> None:
+        """Configure an optional condition-specific runtime transport."""
 
     @abstractmethod
     def initialize(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:

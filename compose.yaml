@@ -9,6 +9,9 @@ services:
       AGENT_API_BASE: ${AGENT_API_BASE:-}
       AGENT_API_KEY: ${AGENT_API_KEY:-}
       AGENT_MODEL_NAME: ${AGENT_MODEL_NAME:-}
+      SHAREDNET_BASE_URL: ${SHAREDNET_BASE_URL:-https://www.sharednet.ai}
+      SHAREDNET_INVITE: ${SHAREDNET_INVITE:-}
+      SHAREDNET_ROOM_ID: ${SHAREDNET_ROOM_ID:-}
     volumes: &run_volumes
       - ${RUN_ROOT:-./runs}:/runs
       - ${PREPARED_TASK:-./benchmark_input}:/input/task:ro

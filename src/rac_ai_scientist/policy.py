@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import Counter
 from fnmatch import fnmatch
 
 from .conditions import Condition
@@ -38,7 +37,6 @@ class SharedPolicy:
     def __init__(self, condition: Condition | str, *, review_score_threshold: float = 8.0):
         self.condition = Condition.parse(condition)
         self.review_score_threshold = review_score_threshold
-        self._avoid_once: set[str] = set()
 
     def decide(self, checkpoint: Checkpoint, *, native_next: str | None = None) -> CoordinationDecision:
         if checkpoint.terminal:
@@ -46,11 +44,14 @@ class SharedPolicy:
         if checkpoint.remaining_budget.exhausted():
             return CoordinationDecision(Action.STOP, None, "lifecycle budget exhausted")
 
-        if self.condition is Condition.N0:
+        if not self.condition.enables("runtime_routing"):
             if native_next is None:
                 return CoordinationDecision(Action.STOP, None, "native workflow has no successor")
             card = self._card(checkpoint, native_next)
-            return CoordinationDecision(Action.CONTINUE, card.capability_id, "native fixed successor")
+            reason = "native fixed successor"
+            if self.condition.enables("runtime_communication"):
+                reason += " with SharedNet communication"
+            return CoordinationDecision(Action.CONTINUE, card.capability_id, reason)
 
         card = self._select(checkpoint)
         if card is None:
@@ -93,16 +94,6 @@ class SharedPolicy:
                 verification,
             )
 
-        if self.condition.enables("issue_aware_control"):
-            attempts: Counter[str] = Counter()
-            for item in checkpoint.issues:
-                if not item.resolved:
-                    attempts[item.kind] = max(attempts[item.kind], item.attempts)
-            if any(value >= 2 for value in attempts.values()):
-                if decision.capability_id:
-                    self._avoid_once.add(decision.capability_id)
-                return CoordinationDecision(Action.REROUTE, None, "repeated unresolved issue requires a different capability", decision.contract, verification)
-
         return CoordinationDecision(Action.RETRY, decision.capability_id, verification.reason, decision.contract, verification)
 
     @staticmethod
@@ -113,8 +104,7 @@ class SharedPolicy:
         raise ValueError(f"native successor {capability_id!r} is not an available capability")
 
     def _select(self, checkpoint: Checkpoint) -> CapabilityCard | None:
-        cards = [card for card in checkpoint.capabilities if card.available and card.capability_id not in self._avoid_once]
-        self._avoid_once.clear()
+        cards = [card for card in checkpoint.capabilities if card.available]
         if not cards:
             return None
         open_issues = [issue for issue in checkpoint.issues if not issue.resolved]

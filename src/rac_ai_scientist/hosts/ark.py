@@ -12,10 +12,12 @@ from typing import Any
 
 from ..artifacts import snapshot_workspace
 from ..bridge import HostBridge
+from ..conditions import Condition
 from ..issues import extract_review_issues, parse_review_score
 from ..manifest import capability_cards, load_host_manifest
 from ..reproducibility import seed_runtime
 from ..schemas import Budget, Checkpoint, CoordinationDecision, InvocationResult, Issue, NativeRunResult, Usage, WorkContract
+from ..sharednet import SharedNetInvite, SharedNetSession
 
 
 ORDER = ("researcher", "experimenter", "writer", "reviewer", "planner")
@@ -60,6 +62,11 @@ class ArkBridge(HostBridge):
         self.open_issues: list[Issue] = []
         self.native_mode = False
         self._pending_transition: tuple[str, list[Issue]] | None = None
+        self.condition = Condition.N0
+        self.sharednet: SharedNetSession | None = None
+
+    def configure_condition(self, condition: Condition | str) -> None:
+        self.condition = Condition.parse(condition)
 
     def initialize(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
         self._initialize(episode_id=episode_id, workspace=workspace, objective=objective, seed=seed, native=False)
@@ -138,6 +145,24 @@ class ArkBridge(HostBridge):
         self.started = time.monotonic()
         self._pending_transition = None
         self.open_issues = [] if native else [Issue("native:researcher", "native_requirement", "initial research framing is incomplete", required_tags=("planning",))]
+        if not native and self.condition.enables("runtime_communication"):
+            room_id = os.environ.get("SHAREDNET_ROOM_ID", "").strip()
+            invite_text = os.environ.get("SHAREDNET_INVITE", "").strip()
+            if not room_id:
+                raise ValueError("ARK R1-R5 requires --sharednet-room-id or SHAREDNET_ROOM_ID")
+            if not invite_text:
+                raise ValueError("ARK R1-R5 requires SHAREDNET_INVITE with the selected Room's invite token")
+            invite = SharedNetInvite.parse(
+                invite_text,
+                room_id=room_id,
+                default_base=os.environ.get("SHAREDNET_BASE_URL", "https://www.sharednet.ai"),
+            )
+            self.sharednet = SharedNetSession(
+                invite,
+                episode_id,
+                tuple(card.capability_id for card in self.cards),
+            )
+            self.sharednet.join()
 
     def run_native(self) -> NativeRunResult:
         """Run ARK's complete scheduler once; RAC makes no phase decisions."""
@@ -237,6 +262,14 @@ class ArkBridge(HostBridge):
         prior_review = self._read_review() if capability_id == "reviewer" else ""
         try:
             prompt = render_contract_prompt(self.objective, capability_id, contract)
+            sharednet = getattr(self, "sharednet", None)
+            if sharednet is not None:
+                prompt = sharednet.request(
+                    capability_id,
+                    self.hop,
+                    prompt,
+                    contract.contract_id if contract is not None else None,
+                )
             if capability_id == "reviewer":
                 self._clear_rendered_pages()
                 try:
@@ -288,9 +321,17 @@ class ArkBridge(HostBridge):
             if capability_id in {"writer", "reviewer"}:
                 self._normalize_report()
             self._pending_transition = (next_capability, next_issues)
+            if sharednet is not None:
+                sharednet.result(capability_id, self.hop, output, next_capability)
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             self._pending_transition = None
+            sharednet = getattr(self, "sharednet", None)
+            if sharednet is not None:
+                try:
+                    sharednet.result(capability_id, self.hop, output, capability_id, error=error)
+                except Exception:
+                    pass
         self.hop += 1
         after = snapshot_workspace(self.workspace)
         usage_after = self._usage_totals()
@@ -320,9 +361,25 @@ class ArkBridge(HostBridge):
             return
         self.native_capability, self.open_issues = self._pending_transition
         self._pending_transition = None
+        sharednet = getattr(self, "sharednet", None)
+        if sharednet is not None:
+            sharednet.disposition(
+                self.hop - 1,
+                accepted=True,
+                reason=evaluation.reason,
+                next_role=self.native_capability,
+            )
 
     def reject_invocation(self, result: InvocationResult, evaluation: CoordinationDecision) -> None:
         self._pending_transition = None
+        sharednet = getattr(self, "sharednet", None)
+        if sharednet is not None:
+            sharednet.disposition(
+                self.hop - 1,
+                accepted=False,
+                reason=evaluation.reason,
+                next_role=result.proposed_next,
+            )
 
     def _successor(self, capability_id: str) -> str:
         try:

@@ -54,6 +54,23 @@ class ArtifactTests(unittest.TestCase):
 
             self.assertEqual([item.relative_path for item in records], ["results/scientific_result.json"])
 
+    def test_snapshot_ignores_runtime_cache_and_provision_log(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            cache = root / ".cache" / "pip"
+            cache.mkdir(parents=True)
+            (cache / "download").write_text("generated", encoding="utf-8")
+            (root / ".env_provision.log").write_text("generated", encoding="utf-8")
+            (root / "AGENTS.md").write_text("runtime instructions", encoding="utf-8")
+            results = root / "results"
+            results.mkdir()
+            (results / "measurement.json").write_text("{}", encoding="utf-8")
+
+            records = snapshot_workspace(root)
+
+            self.assertEqual([item.relative_path for item in records], ["results/measurement.json"])
+            self.assertEqual(records[0].kind, "result")
+
     def test_workspace_transaction_rolls_back_rejected_changes(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

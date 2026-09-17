@@ -45,12 +45,24 @@ class PolicyTests(unittest.TestCase):
         result = InvocationResult("write", "done", (), (), Usage(), proposed_done=True)
         self.assertIs(policy.evaluate(checkpoint(), decision, result).action, Action.STOP)
 
-    def test_r2_routes_by_issue_and_creates_contract(self):
+    def test_r2_routes_by_issue_without_contract(self):
         issue = Issue("I-1", "experiment", "missing baseline")
         decision = SharedPolicy(Condition.R2).decide(checkpoint([issue]))
         self.assertEqual(decision.capability_id, "run")
+        self.assertIsNone(decision.contract)
+
+    def test_r3_routes_by_issue_and_creates_contract(self):
+        issue = Issue("I-1", "experiment", "missing baseline")
+        decision = SharedPolicy(Condition.R3).decide(checkpoint([issue]))
+        self.assertEqual(decision.capability_id, "run")
         self.assertIsNotNone(decision.contract)
         self.assertEqual(decision.contract.issue_ids, ("I-1",))
+
+    def test_r1_uses_native_fixed_successor_with_communication(self):
+        decision = SharedPolicy(Condition.R1).decide(checkpoint(), native_next="write")
+        self.assertEqual(decision.capability_id, "write")
+        self.assertIsNone(decision.contract)
+        self.assertIn("SharedNet", decision.reason)
 
     def test_native_requirement_prefers_named_capability_over_tag_tiebreak(self):
         capabilities = [
@@ -67,7 +79,10 @@ class PolicyTests(unittest.TestCase):
 
         for condition in (Condition.R1, Condition.R2, Condition.R3, Condition.R4, Condition.R5):
             with self.subTest(condition=condition.value):
-                decision = SharedPolicy(condition).decide(cp)
+                decision = SharedPolicy(condition).decide(
+                    cp,
+                    native_next="researcher" if condition is Condition.R1 else None,
+                )
                 self.assertEqual(decision.capability_id, "researcher")
 
     def test_native_requirement_falls_back_to_tags_when_named_capability_is_unavailable(self):
@@ -78,7 +93,7 @@ class PolicyTests(unittest.TestCase):
             required_tags=("planning",),
         )
         cp = Checkpoint("ep", 0, "answer", "researcher", [], [issue], budget(), cards())
-        self.assertEqual(SharedPolicy(Condition.R1).decide(cp).capability_id, "plan")
+        self.assertEqual(SharedPolicy(Condition.R2).decide(cp).capability_id, "plan")
 
     def test_ark_experimenter_contract_allows_generated_report_figures(self):
         config = Path(__file__).resolve().parents[1] / "configs" / "hosts" / "ark.json"
@@ -99,7 +114,7 @@ class PolicyTests(unittest.TestCase):
             "completed experiment",
             [],
             [
-                ArtifactRecord("result", "outputs/result.json", "result", "new-result", 20),
+                ArtifactRecord("result", "results/result.json", "result", "new-result", 20),
                 ArtifactRecord("figure", "report/images/result.pdf", "figure", "new-figure", 20),
             ],
         )
@@ -135,12 +150,15 @@ class PolicyTests(unittest.TestCase):
                         capability=card.capability_id,
                         condition=condition.value,
                     ):
-                        decision = SharedPolicy(condition).decide(cp)
+                        decision = SharedPolicy(condition).decide(
+                            cp,
+                            native_next=card.capability_id if condition is Condition.R1 else None,
+                        )
                         self.assertEqual(decision.capability_id, card.capability_id)
 
-    def test_r4_recovers_changed_artifact_after_timeout(self):
+    def test_r5_recovers_changed_artifact_after_timeout(self):
         cp = checkpoint([Issue("I-1", "experiment", "missing baseline")])
-        policy = SharedPolicy(Condition.R4)
+        policy = SharedPolicy(Condition.R5)
         decision = policy.decide(cp)
         before = ArtifactRecord("r", "outputs/result.json", "result", "old", 20)
         after = ArtifactRecord("r", "outputs/result.json", "result", "new", 20)
@@ -151,7 +169,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_error_cannot_be_overridden_by_satisfied_artifact_evidence(self):
         cp = checkpoint()
-        policy = SharedPolicy(Condition.R3)
+        policy = SharedPolicy(Condition.R4)
         decision = policy.decide(cp)
         report = ArtifactRecord("r", "report/report.md", "terminal_report", "new", 300)
         result = InvocationResult("write", "apparently done", [], [report], error="provider failed", proposed_done=True)
@@ -188,11 +206,9 @@ class PolicyTests(unittest.TestCase):
         result = InvocationResult("write", "done", [before], [before])
         self.assertEqual(verify_result(contract, result).verdict.value, "refuted")
 
-    def test_r5_reroute_avoids_failed_capability_once(self):
+    def test_r5_retries_refuted_capability_without_removed_issue_aware_reroute(self):
         cp = checkpoint([Issue("I-1", "experiment", "still missing", attempts=2)])
         policy = SharedPolicy(Condition.R5)
         first = policy.decide(cp)
         result = InvocationResult(first.capability_id or "", "", [], [])
-        self.assertIs(policy.evaluate(cp, first, result).action, Action.REROUTE)
-        rerouted = policy.decide(cp)
-        self.assertNotEqual(rerouted.capability_id, first.capability_id)
+        self.assertIs(policy.evaluate(cp, first, result).action, Action.RETRY)

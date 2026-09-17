@@ -16,6 +16,7 @@ class BenchmarkTests(unittest.TestCase):
             (task / "target_study").mkdir()
             (task / "data" / "x.csv").write_text("x\n1\n", encoding="utf-8")
             (task / "target_study" / "paper.pdf").write_bytes(b"secret")
+            (task / ".env").write_text("SHAREDNET_INVITE=private", encoding="utf-8")
             (task / "task_info.json").write_text(json.dumps({"task": "demo", "data": []}), encoding="utf-8")
             workspace = tmp_path / "runs" / "ep"
             materialize_rcb_workspace(task, workspace)
@@ -26,6 +27,7 @@ class BenchmarkTests(unittest.TestCase):
             self.assertIn("demo", instructions)
             self.assertNotIn("target_study", instructions)
             self.assertFalse((workspace / "target_study").exists())
+            self.assertFalse((workspace / ".env").exists())
             assert_no_target_study(workspace)
 
     def test_leak_check_fails_closed(self):
