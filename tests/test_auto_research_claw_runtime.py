@@ -1,5 +1,4 @@
 import sys
-import json
 import time
 import tempfile
 import types
@@ -34,10 +33,12 @@ class AutoResearchClawRuntimeTests(unittest.TestCase):
                 bridge.workspace = directory
                 bridge.run_dir = directory / "auto_research_claw_native"
                 bridge.run_dir.mkdir()
-                bridge.config = types.SimpleNamespace(experiment=types.SimpleNamespace(
-                    mode="sandbox", repair=types.SimpleNamespace(enabled=False)))
+                bridge.config = object()
                 bridge.adapters = object()
                 bridge.completed = {"scope", "literature", "synthesis", "design", "experiment"}
+                code = directory / "code/auto_research_claw/main.py"
+                code.parent.mkdir(parents=True)
+                code.write_text("repaired")
                 calls, versions = [], []
                 def execute(stage, **kwargs):
                     calls.append(stage)
@@ -95,57 +96,6 @@ class AutoResearchClawRuntimeTests(unittest.TestCase):
                     self.assertEqual(bridge._next_native(), "writing")
                     self.assertTrue(next(c for c in bridge._available_cards() if c.capability_id == "writing").available)
                     self.assertEqual(len(versions), 1)
-
-    def test_native_analysis_diagnoses_and_repairs_before_research_decision(self):
-        for enabled, mode, needed in ((True, "sandbox", True), (True, "sandbox", False),
-                                       (False, "sandbox", True), (True, "biology_agent", True)):
-            with self.subTest(enabled=enabled, mode=mode, needed=needed), tempfile.TemporaryDirectory() as raw:
-                directory = Path(raw)
-                manifest = Path(__file__).resolve().parents[1] / "configs/hosts/auto_research_claw.json"
-                bridge = AutoResearchClawBridge(directory, manifest, Budget(10, 1000, 1000, 50, 100, 50), "fake", "FAKE-ONLY")
-                bridge.workspace = directory
-                bridge.run_dir = directory / "auto_research_claw_native"
-                bridge.run_dir.mkdir()
-                bridge.adapters = object()
-                bridge.config = types.SimpleNamespace(experiment=types.SimpleNamespace(
-                    mode=mode, repair=types.SimpleNamespace(enabled=enabled)))
-                bridge.completed = {"scope", "literature", "synthesis", "design", "experiment"}
-                events = []
-                done = types.SimpleNamespace(value="done")
-                def execute(stage, **kwargs):
-                    events.append(stage)
-                    if stage == 14:
-                        analysis = bridge.run_dir / "stage-14/analysis.md"
-                        analysis.parent.mkdir(exist_ok=True)
-                        analysis.write_text("Measured results and native diagnosis.")
-                    return types.SimpleNamespace(stage=types.SimpleNamespace(name=str(stage)), status=done, error=None, decision="proceed")
-                def diagnose(*args):
-                    events.append("diagnose")
-                    (bridge.run_dir / "experiment_diagnosis.json").write_text(json.dumps({"repair_needed": needed}))
-                def repair(*args):
-                    events.append("repair")
-                    code = bridge.run_dir / "stage-13/experiment_final/main.py"
-                    code.parent.mkdir(parents=True)
-                    code.write_text("print('native repaired experiment')")
-                modules = {
-                    "researchclaw.pipeline.executor": types.SimpleNamespace(execute_stage=execute),
-                    "researchclaw.pipeline.stages": types.SimpleNamespace(Stage=int, StageStatus=types.SimpleNamespace(DONE=done),
-                        DECISION_ROLLBACK={}, MAX_DECISION_PIVOTS=2),
-                    "researchclaw.pipeline.runner": types.SimpleNamespace(_run_experiment_diagnosis=diagnose,
-                        _run_experiment_repair=repair),
-                }
-                with patch.dict(sys.modules, modules):
-                    bridge.started = time.monotonic()
-                    contract = SharedPolicy(Condition.R5).decide(bridge.checkpoint()).contract
-                    result = bridge.invoke("analysis", contract)
-                self.assertIsNone(result.error)
-                self.assertEqual(verify_result(contract, result).verdict.value, "supported")
-                if enabled and mode == "sandbox" and needed:
-                    self.assertEqual((directory / "code/auto_research_claw/main.py").read_text(), "print('native repaired experiment')")
-                expected = [14]
-                if enabled and mode == "sandbox":
-                    expected += ["diagnose"] + (["repair"] if needed else [])
-                self.assertEqual(events, expected + [15])
 
     def test_sandbox_uses_the_installed_python(self):
         with tempfile.TemporaryDirectory() as raw:

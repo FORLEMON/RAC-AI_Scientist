@@ -225,7 +225,8 @@ class AIResearcherBridge(HostBridge):
                     path.as_posix() for path in sorted((self.workspace / "related_work").rglob("*")) if path.is_file())
                 prompt += "\nSurvey these references through the Paper Survey and Code Survey agents before resolving the survey. Record actual findings in notes; if reference code is absent, state that explicitly."
             elif capability_id in {"implementation_plan", "implementation"}:
-                prompt += "\nModel survey:\n" + self.context["model_survey"]
+                if capability_id == "implementation_plan":
+                    prompt += "\nModel survey:\n" + self.context["model_survey"]
                 prompt += "\nSupplied datasets:\n" + "\n".join(
                     path.as_posix() for path in sorted((self.workspace / "data").rglob("*")) if path.is_file())
                 if capability_id == "implementation":

@@ -181,13 +181,6 @@ class AutoResearchClawBridge(HostBridge):
                     detail = f": {result.error}" if result.error else ""
                     error = f"native stage {result.stage.name} {result.status.value}{detail}"
                     break
-                if (stage_number == 14 and self.config.experiment.repair.enabled
-                    and self.config.experiment.mode not in {"collider_agent", "biology_agent", "stat_agent"}):
-                    from researchclaw.pipeline.runner import _run_experiment_diagnosis, _run_experiment_repair
-                    _run_experiment_diagnosis(self.run_dir, self.config, self.episode_id)
-                    diagnosis = self.run_dir / "experiment_diagnosis.json"
-                    if diagnosis.is_file() and json.loads(diagnosis.read_text(encoding="utf-8")).get("repair_needed"):
-                        _run_experiment_repair(self.run_dir, self.config, self.episode_id)
             output = "\n".join(f"{r.stage.name}: {r.status.value}{': ' + r.error if r.error else ''}" for r in results)
             self._normalize_products()
             if results and all(r.status.value == "done" for r in results):

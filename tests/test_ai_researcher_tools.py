@@ -40,13 +40,15 @@ class ToolArgumentTests(unittest.TestCase):
                         {'role': 'tool', 'name': 'case_resolved', 'content': survey}])
                 self.assertEqual(kwargs['context_variables']['model_survey'], survey)
                 self.assertIn(survey, messages[0]['content'])
+                self.assertEqual(messages[0]['content'].count(survey), 1)
                 return SimpleNamespace(context_variables={}, messages=[
-                    {'role': 'tool', 'name': 'case_resolved', 'content': '# Dataset, model, training and testing plan'}])
+                    {'role': 'tool', 'name': 'case_resolved', 'content': '# Dataset, model, training and testing plan\n' + survey}])
             bridge.client.run_async = run
             self.assertIsNone(bridge.invoke('survey', None).error)
             self.assertEqual((bridge.workspace / 'state/ai_researcher/survey.md').read_text(), survey)
             self.assertIsNone(bridge.invoke('implementation_plan', None).error)
             self.assertIn('implementation_plan', bridge.completed)
+            self.assertIsNone(bridge.invoke('implementation', None).error)
 
     def test_empty_native_survey_receipt_cannot_complete_phase(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -74,7 +76,7 @@ class ToolArgumentTests(unittest.TestCase):
         bridge = object.__new__(AIResearcherBridge)
         bridge.workspace = workspace
         bridge.client = SimpleNamespace()
-        bridge.agents = {name: name for name in ('survey', 'implementation_plan')}
+        bridge.agents = {name: name for name in ('survey', 'implementation_plan', 'implementation')}
         bridge.context = {'notes': []}
         bridge.completed = {'idea'}
         bridge.usage = Usage()
