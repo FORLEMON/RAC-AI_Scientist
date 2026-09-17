@@ -11,9 +11,11 @@ from pathlib import Path
 from .benchmark import assert_no_target_study, materialize_rcb_workspace
 from .artifacts import snapshot_workspace
 from .config import load_config, validate_config
+from .conditions import Condition
 from .ledger import JsonlLedger, config_hash
 from .matrix import expand_matrix
 from .runner import EpisodeRunner
+from .sharednet import SharedNetInvite, load_sharednet_env
 from .schemas import Budget, to_jsonable
 from .provenance import tree_hash
 from .hosts.registry import HOST_IDS, local_snapshot_name, make_bridge
@@ -96,7 +98,7 @@ def _score_episode(args: argparse.Namespace) -> int:
     report = workspace / "report" / "report.md"
     score_path = episode_dir / "score.json"
     if not report.is_file() or not report.read_text(encoding="utf-8", errors="replace").strip():
-        result = {"task_id": metadata.get("task_id"), "total_score": 0.0, "error": "No report found in workspace"}
+        result = {"task_id": metadata.get("task_id"), "total_score": None, "error": "No report found in workspace"}
         score_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(json.dumps(result, indent=2))
         return 2
@@ -175,11 +177,53 @@ def _run_one(args: argparse.Namespace) -> int:
     objective = str(preview.get("task", "")).strip()
     if not objective:
         raise ValueError("ResearchClawBench task has an empty objective")
+    condition = Condition.parse(args.condition)
+    uses_sharednet = args.host == "ark" and condition.enables("runtime_communication")
+    sharednet_settings: dict[str, str] = {}
+    if uses_sharednet:
+        sharednet_env_file = (
+            Path(args.sharednet_env_file).resolve()
+            if args.sharednet_env_file
+            else task_dir / ".env"
+        )
+        sharednet_settings = load_sharednet_env(sharednet_env_file)
+    sharednet_room_id = (
+        args.sharednet_room_id
+        or sharednet_settings.get("SHAREDNET_ROOM_ID")
+        or os.environ.get("SHAREDNET_ROOM_ID", "")
+    ).strip() if uses_sharednet else ""
+    if uses_sharednet:
+        if not sharednet_room_id:
+            raise ValueError("ARK R1-R5 requires SHAREDNET_ROOM_ID in the run-space .env, process environment, or --sharednet-room-id")
+        invite_text = (
+            sharednet_settings.get("SHAREDNET_INVITE")
+            or os.environ.get("SHAREDNET_INVITE", "")
+        ).strip()
+        if not invite_text:
+            raise ValueError("ARK R1-R5 requires SHAREDNET_INVITE in the run-space .env or process environment")
+        sharednet_base_url = (
+            sharednet_settings.get("SHAREDNET_BASE_URL")
+            or os.environ.get("SHAREDNET_BASE_URL", "https://www.sharednet.ai")
+        ).strip()
+        SharedNetInvite.parse(
+            invite_text,
+            room_id=sharednet_room_id,
+            default_base=sharednet_base_url,
+        )
+        os.environ["SHAREDNET_ROOM_ID"] = sharednet_room_id
+        os.environ["SHAREDNET_INVITE"] = invite_text
+        os.environ["SHAREDNET_BASE_URL"] = sharednet_base_url
     episode_dir.mkdir(parents=True)
     materialize_rcb_workspace(task_dir, workspace)
     assert_no_target_study(workspace)
     bridge = make_bridge(args.host, upstream, manifest, budget, model, api_key)
+    bridge.configure_condition(condition)
     host_native_n0 = _uses_host_native_n0(args.host, args.condition)
+    execution_mode = "host_native" if host_native_n0 else (
+        "sharednet_rac_episode_runner"
+        if uses_sharednet
+        else "rac_episode_runner"
+    )
     run_config = {
         "host": args.host,
         "condition": args.condition,
@@ -188,8 +232,10 @@ def _run_one(args: argparse.Namespace) -> int:
         "model": model,
         "budget": to_jsonable(budget),
         "review_score_threshold": args.review_score_threshold,
-        "execution_mode": "host_native" if host_native_n0 else "rac_episode_runner",
+        "execution_mode": execution_mode,
     }
+    if sharednet_room_id:
+        run_config["sharednet_room_id"] = sharednet_room_id
     metadata = {
         "schema_version": 1,
         "episode_id": episode_id,
@@ -203,8 +249,10 @@ def _run_one(args: argparse.Namespace) -> int:
         "workspace_input_sha256": config_hash(to_jsonable(snapshot_workspace(workspace))),
         "manifest_sha256": config_hash(json.loads(manifest.read_text(encoding="utf-8"))),
         "status": "initializing",
-        "execution_mode": "host_native" if host_native_n0 else "rac_episode_runner",
+        "execution_mode": execution_mode,
     }
+    if sharednet_room_id:
+        metadata["communication"] = {"backend": "sharednet", "room_id": sharednet_room_id}
     metadata_path = episode_dir / "episode.json"
     lock_path = root / "upstream.lock.json"
     source_mismatch = False
@@ -336,6 +384,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--host", required=True, choices=HOST_IDS)
     run.add_argument("--upstream", help="explicit host checkout (or set RAC_HOST_ROOT)")
     run.add_argument("--condition", required=True, choices=("N0", "R1", "R2", "R3", "R4", "R5"))
+    run.add_argument("--sharednet-room-id", help="unique SharedNet Room for this episode (or set SHAREDNET_ROOM_ID)")
+    run.add_argument("--sharednet-env-file", help="dotenv file for this run (defaults to <task-dir>/.env)")
     run.add_argument("--task-dir", required=True)
     run.add_argument("--run-root", default="runs")
     run.add_argument("--episode-id")

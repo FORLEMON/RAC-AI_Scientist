@@ -9,7 +9,7 @@ from pathlib import Path
 from .schemas import ArtifactRecord
 
 
-IGNORED_PARTS = {".git", "__pycache__", ".pytest_cache", ".venv", ".conda_env"}
+IGNORED_PARTS = {".git", "__pycache__", ".pytest_cache", ".venv", ".conda_env", ".cache"}
 PRIVATE_TOP_LEVEL = {
     ".ark",
     ".rac",
@@ -22,6 +22,8 @@ PRIVATE_TOP_LEVEL = {
     "auto_research_claw_native",
 }
 SYSTEM_SIDE_EFFECTS = {
+    ".env_provision.log",
+    "AGENTS.md",
     "results/credentials_needed.json",
     "results/environment_setup.json",
     "results/setup_commands.log",
@@ -55,7 +57,7 @@ def artifact_kind(relative: Path) -> str:
         return "code"
     if relative.suffix.lower() in {".png", ".jpg", ".jpeg", ".svg", ".pdf"} and "report" in [part.lower() for part in relative.parts]:
         return "figure"
-    if relative.parts and relative.parts[0].lower() == "outputs":
+    if relative.parts and relative.parts[0].lower() in {"outputs", "results"}:
         return "result"
     return "state"
 

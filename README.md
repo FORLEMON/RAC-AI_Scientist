@@ -16,11 +16,11 @@ acceptance, recovery, or benchmark-specific policy.
 | ID | Enabled coordination mechanisms |
 |---|---|
 | N0 | Native fixed workflow |
-| R1 | Runtime routing |
-| R2 | R1 + scoped work contracts |
-| R3 | R2 + artifact-grounded verification |
-| R4 | R3 + artifact-preserving recovery |
-| R5 | R4 + issue-aware rerouting, reverification, escalation, and stopping |
+| R1 | SharedNet runtime communication over the native fixed workflow |
+| R2 | R1 + runtime routing |
+| R3 | R2 + scoped work contracts |
+| R4 | R3 + artifact-grounded verification |
+| R5 | R4 + artifact-preserving recovery |
 
 Conditions are cumulative. Within a host/task/seed comparison, model, tools,
 permissions, input artifacts, and lifecycle budget must be identical. Router and
@@ -37,7 +37,12 @@ benchmark schema and nested Docker layout; its N0 compatibility path keeps the
 native MetaChain agents and fixed Level-1 ordering while mapping a sanitized
 ResearchClawBench workspace into that flow. It is reported explicitly as a
 compatibility-native run, not as an unmodified invocation of the upstream CLI.
-R1--R5 continue to use the capability-level RAC runner for every host.
+R1--R5 continue to use the capability-level RAC runner for every host.  The
+ARK bridge uses a SharedNet Room as the communication plane for R1--R5 while
+RAC remains the routing, verification, transaction, and stopping control plane.
+R1 keeps ARK's declared fixed successor at every hop; runtime routing begins at
+R2. Other host bridges retain their existing capability transport until they
+gain a host-specific SharedNet adapter.
 
 ## Repository boundary
 
@@ -104,7 +109,20 @@ rac-ai-scientist run-one \
   --max-wall-seconds 14400 --max-hops 20
 ```
 
-The command requires `AGENT_MODEL_NAME` and `AGENT_API_KEY`. It creates a fresh
+The command requires `AGENT_MODEL_NAME` and `AGENT_API_KEY`. For ARK R1--R5,
+create a fresh Room per episode and put its settings in `<task-dir>/.env`:
+
+```dotenv
+SHAREDNET_ROOM_ID=rom_example20260917R5
+SHAREDNET_INVITE='ROOM=rom_example20260917R5 TOKEN=rit_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA BASE=https://www.sharednet.ai'
+```
+
+Use `--sharednet-env-file` when the per-run file lives elsewhere. A command-line
+`--sharednet-room-id` overrides the file, and the selected room must match the
+room embedded in the invite. This dotenv file is read before materialization
+and is not copied into the evaluated workspace. The room id is recorded for
+provenance, while the invite token is never written to the episode. N0 neither
+reads nor requires SharedNet configuration. The command creates a fresh
 episode directory, copies only host-visible benchmark inputs, writes an
 append-only coordination ledger, and refuses to reuse an existing episode ID.
 
@@ -179,7 +197,7 @@ have not been certified merely by the offline unit suite.
   ResearchClawBench scorer may read it.
 - Every episode records the host and RAC source revisions, configuration hash,
   task, seed, condition, budget, usage, terminal status, and artifact hashes.
-- An agent's completion statement is not evidence. R3+ accepts work only from
+- An agent's completion statement is not evidence. R4+ accepts work only from
   persisted effects checked outside the delegate.
 - Failed and budget-exhausted episodes remain in the denominator.
 - Host-specific capability names and filesystem paths may appear in bridge data;
@@ -190,8 +208,8 @@ have not been certified merely by the offline unit suite.
 The collected RAC source describes itself as a research alpha. Its reference
 `baselines/algorithms/rac.py` intentionally omits retry/reroute policy, spawn
 templates, disclosure measurement, and in-turn deadlines, while this paper's
-N0–R5 study requires routing, contracts, verification, recovery, and issue-aware
-control. Consequently, its schemas and mechanism invariants are treated as the
+N0–R5 study requires communication, routing, contracts, verification, and recovery.
+Consequently, its schemas and mechanism invariants are treated as the
 design source, but the complete longitudinal condition profile is implemented
 and tested here. This avoids importing an exploratory baseline and claiming it
 already implements mechanisms it explicitly does not.

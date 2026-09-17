@@ -25,11 +25,11 @@ class Condition(IntEnum):
 
     def enables(self, component: str) -> bool:
         thresholds = {
-            "runtime_routing": self.R1,
-            "work_contracts": self.R2,
-            "verifier": self.R3,
-            "recovery": self.R4,
-            "issue_aware_control": self.R5,
+            "runtime_communication": self.R1,
+            "runtime_routing": self.R2,
+            "work_contracts": self.R3,
+            "verifier": self.R4,
+            "recovery": self.R5,
         }
         try:
             return self >= thresholds[component]

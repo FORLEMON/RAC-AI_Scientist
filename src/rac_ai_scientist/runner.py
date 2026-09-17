@@ -44,7 +44,7 @@ class EpisodeRunner:
             self.ledger.append({"type": "checkpoint", "condition": self.condition.name, "payload": checkpoint})
 
             if pending is None or pending.action in {Action.REROUTE, Action.REVERIFY}:
-                native = self.bridge.native_next(checkpoint) if self.condition is Condition.N0 else None
+                native = self.bridge.native_next(checkpoint) if not self.condition.enables("runtime_routing") else None
                 decision = self.policy.decide(checkpoint, native_next=native)
             elif pending.action is Action.RETRY:
                 decision = pending

@@ -2,7 +2,9 @@
 
 ## One policy, six host interfaces
 
-For R1--R5, the common runner owns the episode loop. At each hop it requests a normalized
+For R1--R5, the common runner owns the episode loop. ARK additionally publishes
+typed work requests, results, and accept/reject dispositions in a caller-selected
+SharedNet Room. At each hop the runner requests a normalized
 checkpoint from the host bridge. The checkpoint contains the objective, native
 stage, persisted artifact manifest, unresolved issues, remaining budget, and
 capability cards. The selected condition determines which common mechanisms may
@@ -46,15 +48,15 @@ classify issues for routing, or decide when the episode stops.
   consume a generic ResearchClawBench task or run outside its nested benchmark
   Docker layout. The integration layer records only the native run boundary,
   artifacts, usage, and terminal state.
-- **R1** selects from admitted capability cards using the shared policy.
-- **R2** additionally supplies a minimum-scoped contract derived from the chosen
+- **R1** adds SharedNet runtime communication while preserving the host's fixed
+  native successor at every hop.
+- **R2** selects from admitted capability cards using the shared policy.
+- **R3** additionally supplies a minimum-scoped contract derived from the chosen
   card and checkpoint.
-- **R3** fingerprints declared writable artifacts before and after execution and
+- **R4** fingerprints declared writable artifacts before and after execution and
   produces `supported`, `refuted`, or `inconclusive`.
-- **R4** may preserve verified partial effects after timeout/empty response and
+- **R5** may preserve verified partial effects after timeout/empty response and
   reconstruct a safe next checkpoint.
-- **R5** maintains stable issue records and uses their type, repetition, and
-  acceptance checks to reroute, reverify, escalate, or stop.
 
 ## Benchmark boundary
 
