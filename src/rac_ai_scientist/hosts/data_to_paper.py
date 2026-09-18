@@ -40,6 +40,29 @@ REQUIRED_TAGS = {
 }
 
 
+def _install_review_shape_validation() -> None:
+    """Reject malformed native review pairs through data-to-paper's correction loop."""
+    from data_to_paper.base_steps.request_code import RequestIssuesToSolutions
+
+    original = RequestIssuesToSolutions._check_response_value
+    if getattr(original, "_rac_review_shape", False):
+        return
+
+    def check_response_value(requester, value):
+        # The native caller already validates Dict[str, List[str]], not list length.
+        for key, assessment in value.items():
+            if len(assessment) != 2:
+                requester._raise_self_response_error(
+                    title="# Invalid review pair.",
+                    error_message=f"Each check must contain exactly 2 strings: [CONCERN/OK, feedback]. "
+                    f"Check {key!r} contains {len(assessment)} items; give separate checks distinct keys.",
+                )
+        return original(requester, value)
+
+    check_response_value._rac_review_shape = True
+    RequestIssuesToSolutions._check_response_value = check_response_value
+
+
 def _write_data_descriptions(workspace: Path, objective: str, data_filenames: list[str]) -> None:
     info = json.loads((workspace / "task.json").read_text(encoding="utf-8"))
     declared = {
@@ -105,6 +128,7 @@ class DataToPaperBridge(HostBridge):
         from data_to_paper.research_types.hypothesis_testing.scientific_stage import ScientificStage
         from data_to_paper.research_types.hypothesis_testing.steps_runner import HypothesisTestingStepsRunner
 
+        _install_review_shape_validation()
         self._install_model_adapter()
         self.stage = ScientificStage
         config = {
