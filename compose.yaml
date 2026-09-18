@@ -68,8 +68,12 @@ services:
       additional_contexts:
         benchmark: ${RCB_CONTEXT:-./upstreams/researchclawbench}
     environment:
+      JUDGE_PROVIDER: ${JUDGE_PROVIDER:-}
       JUDGE_API_BASE: ${JUDGE_API_BASE:-}
       JUDGE_API_KEY: ${JUDGE_API_KEY:-}
       JUDGE_MODEL_NAME: ${JUDGE_MODEL_NAME:-}
+      JUDGE_API_VERSION: ${JUDGE_API_VERSION:-2025-04-01-preview}
+      JUDGE_MAX_COMPLETION_TOKENS: ${JUDGE_MAX_COMPLETION_TOKENS:-1000}
+      JUDGE_MAX_WORKERS: ${JUDGE_MAX_WORKERS:-1}
     volumes:
       - ${RUN_ROOT:-./runs}:/runs

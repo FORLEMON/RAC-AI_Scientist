@@ -9,7 +9,7 @@ description = "Matched-budget RAC experiments across AI-scientist host systems"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-dependencies = []
+dependencies = ["openai>=1.0"]
 
 [project.scripts]
 rac-ai-scientist = "rac_ai_scientist.cli:main"
