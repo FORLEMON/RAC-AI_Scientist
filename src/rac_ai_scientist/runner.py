@@ -43,7 +43,9 @@ class EpisodeRunner:
                 issue.attempts = max(issue.attempts, self._issue_sightings[key] - 1)
             self.ledger.append({"type": "checkpoint", "condition": self.condition.name, "payload": checkpoint})
 
-            if pending is None or pending.action in {Action.REROUTE, Action.REVERIFY}:
+            if checkpoint.terminal or checkpoint.remaining_budget.exhausted():
+                decision = self.policy.decide(checkpoint)
+            elif pending is None or pending.action in {Action.REROUTE, Action.REVERIFY}:
                 native = self.bridge.native_next(checkpoint) if not self.condition.enables("runtime_routing") else None
                 decision = self.policy.decide(checkpoint, native_next=native)
             elif pending.action is Action.RETRY:
@@ -67,7 +69,7 @@ class EpisodeRunner:
                 self.ledger.append({"type": "evaluation", "hop": invocations, "payload": pending})
                 invocations += 1
 
-                if pending.action in {Action.RETRY, Action.REROUTE}:
+                if pending.action in {Action.RETRY, Action.REROUTE, Action.ESCALATE}:
                     transaction.rollback()
                     self.bridge.reject_invocation(result, pending)
                 elif pending.action is Action.RECOVER:
@@ -89,6 +91,8 @@ class EpisodeRunner:
             finally:
                 transaction.close()
 
+            if pending is not None and pending.action is Action.ESCALATE:
+                return EpisodeOutcome("escalate", invocations, pending.reason)
             if pending is not None and pending.action is Action.STOP:
                 if result.error and "Error code: 402" in result.error:
                     return EpisodeOutcome("budget_exhausted", invocations, pending.reason)

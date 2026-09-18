@@ -10,6 +10,37 @@ from rac_ai_scientist.schemas import Budget, CapabilityCard, CoordinationDecisio
 
 
 class ArkReportTests(unittest.TestCase):
+    def test_external_bibliography_keeps_native_citations_for_citeproc(self):
+        with tempfile.TemporaryDirectory() as raw:
+            report = Path(raw) / "report"
+            report.mkdir()
+            source = report / "main.tex"
+            original = "\\section{Results}\nEvidence\\cite{paper_a}.\n\\bibliography{references}\n"
+            source.write_text(original, encoding="utf-8")
+            (report / "references.bib").write_text("@article{paper_a,title={Measured evidence},author={Example},year={2026}}", encoding="utf-8")
+            self.assertIn(r"\cite{paper_a}", ArkBridge._markdown_latex_source(source))
+            bridge = object.__new__(ArkBridge)
+            bridge.workspace = Path(raw)
+            def convert(command, **kwargs):
+                self.assertIn("--citeproc", command)
+                self.assertIn("--bibliography=references.bib", command)
+                (report / ".report.md.tmp").write_text("# Results\nMeasured evidence\n# References\nExample", encoding="utf-8")
+            with patch("subprocess.run", side_effect=convert):
+                bridge._normalize_report()
+            self.assertEqual(source.read_text(encoding="utf-8"), original)
+
+    def test_markdown_export_removes_only_ark_page_count_probe(self):
+        marker = (r"\makeatletter\pdfsavepos\write\@auxout{\string\gdef\string\arkBodyEndY{\the\pdflastypos}"
+                  r"\string\gdef\string\arkPageH{\number\pdfpageheight}"
+                  r"\string\gdef\string\arkBodyEndPage{\arabic{page}}}\makeatother")
+        original = "\\section{Results}\nMeasured result.\n" + marker + "\n\\clearpage\n\\bibliography{references}\n"
+        with tempfile.TemporaryDirectory() as raw:
+            source = Path(raw) / "main.tex"
+            source.write_text(original, encoding="utf-8")
+            converted = ArkBridge._markdown_latex_source(source)
+            self.assertEqual(converted, original.replace(marker, ""))
+            self.assertEqual(source.read_text(encoding="utf-8"), original)
+
     def test_placeholder_tex_does_not_become_a_terminal_report(self):
         with tempfile.TemporaryDirectory() as raw:
             report = Path(raw) / "report"

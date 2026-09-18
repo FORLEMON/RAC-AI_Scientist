@@ -161,6 +161,7 @@ class InvocationResult:
     proposed_next: str | None = None
     proposed_done: bool = False
     metrics: dict[str, float] = field(default_factory=dict)
+    terminal_error: bool = False
 
 
 @dataclass(frozen=True)

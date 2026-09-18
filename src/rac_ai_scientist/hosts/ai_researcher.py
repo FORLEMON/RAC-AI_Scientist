@@ -34,7 +34,7 @@ class _LocalCommandEnv:
         self.root = root
         self.local_workplace = str(root)
         self.docker_workplace = str(root)
-        self.workplace_name = root.name
+        self.workplace_name = root.as_posix().lstrip("/")
         self.timeout = timeout
 
     def run_command(self, command: str, stream_callback=None):
@@ -216,6 +216,21 @@ class AIResearcherBridge(HostBridge):
         metrics: dict[str, float] = {}
         try:
             prompt = render_contract_prompt(self.objective, capability_id, contract)
+            prompt += f"\nWorkspace: {self.workspace.as_posix()}\nSupplied research papers are in related_work/; supplied datasets are in data/."
+            if capability_id == "survey":
+                self.context["notes"] = []
+                idea = self.workspace / "state" / "ai_researcher" / "idea.md"
+                prompt += "\nResearch proposal:\n" + idea.read_text(encoding="utf-8")
+                prompt += "\nReference papers:\n" + "\n".join(
+                    path.as_posix() for path in sorted((self.workspace / "related_work").rglob("*")) if path.is_file())
+                prompt += "\nSurvey these references through the Paper Survey and Code Survey agents before resolving the survey. Record actual findings in notes; if reference code is absent, state that explicitly."
+            elif capability_id in {"implementation_plan", "implementation"}:
+                if capability_id == "implementation_plan":
+                    prompt += "\nModel survey:\n" + self.context["model_survey"]
+                prompt += "\nSupplied datasets:\n" + "\n".join(
+                    path.as_posix() for path in sorted((self.workspace / "data").rglob("*")) if path.is_file())
+                if capability_id == "implementation":
+                    prompt += "\nImplementation plan:\n" + (self.workspace / "state" / "ai_researcher" / "implementation_plan.md").read_text(encoding="utf-8")
             if capability_id == "paper_writing":
                 prompt += "\nRead persisted plans, code, and outputs, then return the complete Markdown report."
             elif capability_id == "review":
@@ -223,13 +238,17 @@ class AIResearcherBridge(HostBridge):
                 prompt += "\nReport to review:\n" + (report.read_text(encoding="utf-8", errors="replace") if report.is_file() else "[missing]")
             response = asyncio.run(self.client.run_async(self.agents[capability_id],
                 [{"role": "user", "content": prompt}], context_variables=self.context,
-                model_override=self.model, debug=False, max_turns=max(2, self.initial_budget.agent_calls - self.usage.agent_calls)))
-            self.context.update(response.context_variables)
+                model_override=self.model, debug=False))
             provider_errors = [item.get("content", "") for item in response.messages
                                if isinstance(item, dict) and item.get("role") == "error"]
             if provider_errors:
                 raise RuntimeError("; ".join(provider_errors))
             output = self._response_output(capability_id, response.messages)
+            if capability_id == "survey" and not response.context_variables["notes"]:
+                raise RuntimeError("survey resolved without research notes")
+            self.context.update(response.context_variables)
+            if capability_id == "survey":
+                self.context["model_survey"] = output
             self._persist(capability_id, output)
             self.completed.add(capability_id)
             if capability_id == "review":
@@ -254,11 +273,18 @@ class AIResearcherBridge(HostBridge):
 
     @staticmethod
     def _response_output(capability_id: str, messages) -> str:
-        if capability_id in {"paper_writing", "review"}:
-            assistant = [str(item.get("content", "")) for item in messages
-                         if isinstance(item, dict) and item.get("role") == "assistant"]
-            return assistant[-1] if assistant else ""
-        return "\n".join(str(item.get("content", "")) for item in messages if isinstance(item, dict))
+        terminal = messages[-1] if messages else {}
+        if capability_id in {"idea", "paper_writing", "review"}:
+            if (terminal.get("role") != "assistant" or terminal.get("tool_calls")
+                    or not (terminal.get("content") or "").strip()):
+                raise RuntimeError(f"{capability_id} returned without a final assistant product")
+            return terminal["content"]
+        if terminal.get("role") == "tool" and terminal.get("name") == "case_not_resolved":
+            raise RuntimeError(terminal["content"])
+        if (terminal.get("role") != "tool" or terminal.get("name") != "case_resolved"
+                or terminal.get("content", "").startswith("[Tool Call Error]")):
+            raise RuntimeError(f"{capability_id} returned without successful case_resolved")
+        return terminal["content"]
 
     @staticmethod
     def _install_tool_argument_adapter(client) -> None:
@@ -322,7 +348,7 @@ class AIResearcherBridge(HostBridge):
                 bridge.usage.input_tokens + inp, bridge.usage.output_tokens + out,
                 bridge.usage.agent_calls + 1, bridge.usage.wall_seconds,
                 "provider_response" if cost is not None else "unavailable", "provider_response")
-            if any(choice.finish_reason == "length" and not choice.message.content and not choice.message.tool_calls
+            if any(choice.finish_reason == "length" and not (choice.message.content or "").strip() and not choice.message.tool_calls
                    for choice in result.choices):
                 raise RuntimeError("model response exhausted output limit without text or tool call")
             return result
@@ -354,7 +380,7 @@ class AIResearcherBridge(HostBridge):
 
     def _available_cards(self):
         idx = ORDER.index(self._next_native()) if not self.terminal else len(ORDER)
-        return [replace(c, available=ORDER.index(c.capability_id) <= min(idx + 1, len(ORDER) - 1)) for c in self.cards]
+        return [replace(c, available=ORDER.index(c.capability_id) <= idx) for c in self.cards]
 
     def _next_native(self) -> str:
         return next((item for item in ORDER if item not in self.completed), "review")

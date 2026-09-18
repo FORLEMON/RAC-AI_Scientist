@@ -168,7 +168,7 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(outcome.hops, 1)
         self.assertIn("402", outcome.reason)
 
-    def test_refuted_invocation_is_rolled_back_before_retry(self):
+    def test_authority_violation_rolls_back_report_and_code_before_escalation(self):
         class TransactionalBridge(HostBridge):
             host_id = "transactional"
 
@@ -209,10 +209,10 @@ class RunnerTests(unittest.TestCase):
                     (self.workspace / "unauthorized").write_text("bad", encoding="utf-8")
                 return InvocationResult(
                     capability_id,
-                    "done",
+                    "",
                     before,
                     snapshot_workspace(self.workspace),
-                    proposed_done=True,
+                    timed_out=True,
                 )
 
             def accept_invocation(self, result, evaluation):
@@ -221,12 +221,46 @@ class RunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             bridge = TransactionalBridge(root)
-            outcome = EpisodeRunner(bridge, "R5", JsonlLedger(root / "trace.jsonl")).run(hard_hop_limit=2)
+            outcome = EpisodeRunner(bridge, "R5", JsonlLedger(root / "trace.jsonl")).run(hard_hop_limit=1)
 
-            self.assertEqual(outcome.status, "completed")
-            self.assertEqual(outcome.hops, 2)
+            self.assertEqual(outcome.status, "escalate")
+            self.assertEqual(outcome.hops, 1)
             self.assertFalse((root / "unauthorized").exists())
-            self.assertTrue((root / "report" / "report.md").is_file())
+            self.assertFalse((root / "report" / "report.md").exists())
+            self.assertFalse(bridge.done)
+
+    def test_pending_retry_cannot_bypass_exhausted_lifecycle_budget(self):
+        class RetryingBridge(FakeBridge):
+            def checkpoint(self):
+                cp = super().checkpoint()
+                if self.invocations:
+                    cp.remaining_budget = dataclasses.replace(cp.remaining_budget, agent_calls=0)
+                return cp
+
+            def invoke(self, capability_id, contract):
+                self.invocations += 1
+                return InvocationResult(capability_id, "native transport refused", [], [])
+
+        with tempfile.TemporaryDirectory() as raw:
+            bridge = RetryingBridge()
+            outcome = EpisodeRunner(bridge, "R5", JsonlLedger(Path(raw) / "trace.jsonl")).run(hard_hop_limit=33)
+        self.assertEqual(outcome.status, "budget_exhausted")
+        self.assertEqual(outcome.hops, 1)
+        self.assertEqual(bridge.invocations, 1)
+
+    def test_native_terminal_error_exits_failed_after_one_invocation(self):
+        class TerminalFailureBridge(FakeBridge):
+            def invoke(self, capability_id, contract):
+                self.invocations += 1
+                return InvocationResult(capability_id, "", [], [],
+                    error="native provider terminal error", terminal_error=True)
+
+        with tempfile.TemporaryDirectory() as raw:
+            bridge = TerminalFailureBridge()
+            outcome = EpisodeRunner(bridge, "R5", JsonlLedger(Path(raw) / "trace.jsonl")).run(hard_hop_limit=33)
+        self.assertEqual(outcome.status, "failed")
+        self.assertEqual(bridge.invocations, 1)
+        self.assertEqual(outcome.reason, "native provider terminal error")
 
     def test_recovery_retries_same_capability_without_consuming_control_hop(self):
         class RecoveringBridge(HostBridge):
@@ -264,7 +298,6 @@ class RunnerTests(unittest.TestCase):
                 output.parent.mkdir(parents=True, exist_ok=True)
                 output.write_text(f'{{"attempt": {self.attempts}}}', encoding="utf-8")
                 if self.attempts == 1:
-                    (self.workspace / "unauthorized").write_text("bad", encoding="utf-8")
                     return InvocationResult(capability_id, "", before, snapshot_workspace(self.workspace), timed_out=True)
                 return InvocationResult(capability_id, "done", before, snapshot_workspace(self.workspace), proposed_done=True)
 

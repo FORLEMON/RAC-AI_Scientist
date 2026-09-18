@@ -10,6 +10,22 @@ from rac_ai_scientist.hosts.ark import ArkBridge
 
 
 class ArkUsageTests(unittest.TestCase):
+    def test_recorded_zero_requests_are_not_counted_as_one_phase_request(self):
+        with tempfile.TemporaryDirectory() as raw:
+            state = Path(raw) / "failed-conversation"
+            state.mkdir()
+            (state / "base_state.json").write_text(json.dumps({"stats": {"usage_to_metrics": {}}}), encoding="utf-8")
+            class FakeOpenHandsCLI:
+                def parse_output(self, stdout):
+                    return {"conversation_id": "failed-conversation", "error_code": "APIError", "usage": {"input_tokens": 0, "output_tokens": 0}}
+            with patch.dict(os.environ, {"ARK_OPENHANDS_CONV_DIR": raw}):
+                ArkBridge._install_openhands_usage(FakeOpenHandsCLI)
+                parsed = FakeOpenHandsCLI().parse_output("provider rejected the request")
+            bridge = object.__new__(ArkBridge)
+            bridge.orchestrator = types.SimpleNamespace(_agent_stats=[parsed["usage"]])
+            self.assertEqual(parsed["usage"]["model_requests"], 0)
+            self.assertEqual(bridge._usage_totals().agent_calls, 0)
+
     def test_persisted_openhands_calls_count_as_model_requests(self):
         with tempfile.TemporaryDirectory() as raw:
             state = Path(raw) / "conversation-1"
