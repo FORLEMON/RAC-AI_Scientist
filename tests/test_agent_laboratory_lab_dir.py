@@ -45,6 +45,7 @@ class AgentLaboratoryLabDirTests(unittest.TestCase):
                 patch("rac_ai_scientist.hosts.agent_laboratory._install_arxiv_transport"),
                 patch("rac_ai_scientist.hosts.agent_laboratory._install_hf_data_search"),
                 patch("rac_ai_scientist.hosts.agent_laboratory._install_report_writing_scope"),
+                patch("rac_ai_scientist.hosts.agent_laboratory._install_edit_range_validation"),
                 patch.object(AgentLaboratoryBridge, "_install_model_adapter"),
                 patch.object(AgentLaboratoryBridge, "_save"),
             ):

@@ -114,6 +114,24 @@ def _install_report_writing_scope() -> None:
     ai_lab_repo.LaboratoryWorkflow.report_writing = report_writing
 
 
+def _install_edit_range_validation() -> None:
+    """Validate the native EDIT interval before it mutates the current code list."""
+    import mlesolver
+
+    original = mlesolver.Edit.execute_command
+    if getattr(original, "_rac_edit_range", False):
+        return
+
+    def execute_command(editor, *args):
+        start, end, lines, _, _ = args[0]
+        if not 0 <= start <= end < len(lines):
+            return False, None, f"EDIT range must satisfy 0 <= N <= M < {len(lines)}; got {start}:{end}."
+        return original(editor, *args)
+
+    execute_command._rac_edit_range = True
+    mlesolver.Edit.execute_command = execute_command
+
+
 class AgentLaboratoryBridge(HostBridge):
     """Thin state/invocation bridge over Agent Laboratory's existing phase methods."""
 
@@ -165,6 +183,7 @@ class AgentLaboratoryBridge(HostBridge):
             _install_arxiv_transport()
             _install_hf_data_search(self.workspace)
             _install_report_writing_scope()
+            _install_edit_range_validation()
             self._install_model_adapter()
 
             models = {native: self.model for native in NATIVE_NAMES.values()}
