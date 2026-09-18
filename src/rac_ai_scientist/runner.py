@@ -77,7 +77,10 @@ class EpisodeRunner:
                     pending = None
                 elif result.error or result.timed_out:
                     transaction.rollback()
-                    self.bridge.reject_invocation(result, pending)
+                    if result.timed_out and pending.action is Action.REVERIFY:
+                        self.bridge.fail_invocation(result, pending)
+                    else:
+                        self.bridge.reject_invocation(result, pending)
                 else:
                     self.bridge.accept_invocation(result, pending)
             except Exception:
