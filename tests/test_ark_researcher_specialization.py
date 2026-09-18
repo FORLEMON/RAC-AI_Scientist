@@ -43,6 +43,25 @@ class FakeResearchCompiler:
         self._write_specializations()
 
 
+class DiskResearchCompiler(FakeResearchCompiler):
+    """Observed host behavior: persist a section, return only its save receipt."""
+
+    def __init__(self, workspace, *, section_body="Measured domain guidance", missing_base=None):
+        super().__init__(workspace)
+        self.section_body = section_body
+        self.missing_base = missing_base
+
+    def _write_specializations(self):
+        agents = self.workspace / ".rac" / "ark_project" / "agents"
+        agents.mkdir(parents=True, exist_ok=True)
+        for role in DOWNSTREAM:
+            section = f"## Project-Specific Knowledge\n{self.section_body}\n"
+            (self.workspace / "auto_research" / "state" / f"{role}_specialization.md").write_text(section, encoding="utf-8")
+            if role != self.missing_base:
+                content = section if role in {"planner", "reviewer"} else "Saved the section to its specialization file."
+                (agents / f"{role}.prompt").write_text(f"base {role}\n\n{content}", encoding="utf-8")
+
+
 class ArkResearcherSpecializationTests(unittest.TestCase):
     def bridge(self, workspace: Path, orchestrator: FakeResearchCompiler) -> ArkBridge:
         bridge = object.__new__(ArkBridge)
@@ -77,6 +96,80 @@ class ArkResearcherSpecializationTests(unittest.TestCase):
             self.assertEqual(orchestrator.phase_calls, 1)
             self.assertEqual(orchestrator.specialize_calls, 1)
             self.assertTrue(bridge._research_prompts_specialized())
+
+    def test_saved_native_sections_are_handed_to_existing_prompts_without_another_model_pass(self):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            orchestrator = DiskResearchCompiler(workspace)
+            bridge = self.bridge(workspace, orchestrator)
+
+            bridge._run_native_research_specialization()
+
+            self.assertEqual(orchestrator.specialize_calls, 0)
+            self.assertTrue(bridge._research_prompts_specialized())
+            for role in DOWNSTREAM:
+                prompt = workspace / ".rac" / "ark_project" / "agents" / f"{role}.prompt"
+                text = prompt.read_text(encoding="utf-8")
+                self.assertIn(f"base {role}", text)
+                self.assertEqual(text.count("## Project-Specific Knowledge"), 1)
+                self.assertIn("Measured domain guidance", text)
+
+    def test_saved_sections_never_replace_missing_base_prompts(self):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            bridge = self.bridge(workspace, DiskResearchCompiler(workspace, missing_base="coder"))
+            with self.assertRaisesRegex(RuntimeError, "coder.prompt"):
+                bridge._run_native_research_specialization()
+            self.assertFalse((workspace / ".rac/ark_project/agents/coder.prompt").exists())
+
+    def test_empty_sections_and_inline_receipts_do_not_satisfy_the_guard(self):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            bridge = self.bridge(workspace, DiskResearchCompiler(workspace, section_body=""))
+            with self.assertRaisesRegex(RuntimeError, "experimenter.prompt"):
+                bridge._run_native_research_specialization()
+            prompt = workspace / ".rac/ark_project/agents/experimenter.prompt"
+            prompt.write_text('The file contains `## Project-Specific Knowledge`.\nSaved successfully.', encoding="utf-8")
+            self.assertFalse(bridge._research_prompts_specialized())
+
+    def test_specialization_body_ends_at_the_next_peer_or_parent_heading(self):
+        header = "## Project-Specific Knowledge\n"
+        for next_heading in ("# Other Section", "## Other Section"):
+            with self.subTest(next_heading=next_heading):
+                empty = header + "\n" + next_heading + "\nUnrelated instructions."
+                self.assertEqual(ArkBridge._research_specialization_section(empty), "")
+                valid = header + "Measured domain guidance.\n### Installation\nUse the existing environment."
+                self.assertEqual(ArkBridge._research_specialization_section(valid + "\n" + next_heading + "\nUnrelated."), valid)
+                self.assertEqual(ArkBridge._research_specialization_section(empty + "\n" + valid), valid)
+
+    def test_missing_context_is_identified(self):
+        with tempfile.TemporaryDirectory() as raw:
+            orchestrator = FakeResearchCompiler(Path(raw))
+            orchestrator._write_context = lambda: None
+            bridge = self.bridge(Path(raw), orchestrator)
+            with self.assertRaisesRegex(RuntimeError, "project_context.md"):
+                bridge._run_native_research_specialization()
+
+    def test_native_terminal_error_stops_before_specialization_retry(self):
+        with tempfile.TemporaryDirectory() as raw:
+            orchestrator = FakeResearchCompiler(Path(raw), complete_in_phase=False)
+            orchestrator._terminal_error = "provider rejected the research call"
+            bridge = self.bridge(Path(raw), orchestrator)
+            with self.assertRaisesRegex(RuntimeError, "provider rejected the research call"):
+                bridge._run_native_research_specialization()
+            self.assertEqual(orchestrator.specialize_calls, 0)
+
+    def test_native_terminal_error_from_specialization_retry_is_preserved(self):
+        with tempfile.TemporaryDirectory() as raw:
+            orchestrator = FakeResearchCompiler(Path(raw), complete_in_phase=False)
+            def fail_specialize():
+                orchestrator.specialize_calls += 1
+                orchestrator._terminal_error = "provider rejected the specialization call"
+            orchestrator._specialize_agent_prompts = fail_specialize
+            bridge = self.bridge(Path(raw), orchestrator)
+            with self.assertRaisesRegex(RuntimeError, "provider rejected the specialization call"):
+                bridge._run_native_research_specialization()
+            self.assertEqual(orchestrator.specialize_calls, 1)
 
 
 if __name__ == "__main__":

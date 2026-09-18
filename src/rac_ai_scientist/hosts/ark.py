@@ -175,7 +175,9 @@ class ArkBridge(HostBridge):
         started = time.monotonic()
 
         self.orchestrator.run()
-        self._normalize_report()
+        native_error = getattr(self.orchestrator, "_run_fatal", None) or getattr(self.orchestrator, "_terminal_error", None)
+        if not native_error:
+            self._normalize_report()
 
         after = snapshot_workspace(self.workspace)
         usage_after = self._usage_totals()
@@ -184,7 +186,10 @@ class ArkBridge(HostBridge):
         iterations = int(getattr(self.orchestrator, "iteration", 0) or 0)
         review_score = float(paper_state.get("current_score", 0) or 0)
         stopped = bool(getattr(self.orchestrator, "_stop_requested", False))
-        if native_status == "accepted":
+        if native_error:
+            status = "failed"
+            reason = native_error
+        elif native_status == "accepted":
             status = "completed"
             reason = "ARK native acceptance threshold reached"
         elif stopped:
@@ -270,6 +275,8 @@ class ArkBridge(HostBridge):
                     prompt,
                     contract.contract_id if contract is not None else None,
                 )
+                if contract is not None:
+                    prompt += "\nPrior Room messages are background, not additional assignments. Address only the issues in the current work contract and stay within its writable paths."
             if capability_id == "reviewer":
                 self._clear_rendered_pages()
                 try:
@@ -281,6 +288,8 @@ class ArkBridge(HostBridge):
                 output = self._run_native_research_specialization()
             else:
                 output = self.orchestrator.run_agent(capability_id, prompt, timeout=timeout)
+            if getattr(self.orchestrator, "_terminal_error", None):
+                raise RuntimeError(self.orchestrator._terminal_error)
             timed_out = not output.strip() and time.monotonic() - started >= max(1, timeout - 1)
             if capability_id == "reviewer":
                 review_text = self._review_text(output, previous=prior_review)
@@ -310,7 +319,9 @@ class ArkBridge(HostBridge):
                     )
             else:
                 self._persist_output(capability_id, output)
-                next_issues = [
+                unassigned = [issue for issue in self.open_issues
+                              if not issue.resolved and issue.issue_id not in contract.issue_ids] if contract else []
+                next_issues = unassigned or [
                     Issue(
                         f"native:{next_capability}",
                         "native_requirement",
@@ -354,6 +365,7 @@ class ArkBridge(HostBridge):
             proposed_next=capability_id if timed_out or not output.strip() else next_capability,
             proposed_done=proposed_done,
             metrics=metrics,
+            terminal_error=bool(getattr(self.orchestrator, "_terminal_error", None)),
         )
 
     def accept_invocation(self, result: InvocationResult, evaluation: CoordinationDecision) -> None:
@@ -403,17 +415,41 @@ class ArkBridge(HostBridge):
 
     def _research_prompts_specialized(self) -> bool:
         """Return whether ARK's native researcher initialized downstream prompts."""
+        return not self._missing_research_specializations()
+
+    @staticmethod
+    def _research_specialization_section(text: str) -> str:
+        for heading in re.finditer(r"(?m)^## Project-Specific Knowledge[ \t]*\r?$", text):
+            body = re.split(r"(?m)^#{1,2}(?:[ \t]+|$)", text[heading.end():], maxsplit=1)[0]
+            if body.strip():
+                return (text[heading.start():heading.end()] + body).strip()
+        return ""
+
+    def _missing_research_specializations(self) -> list[Path]:
         assert self.workspace is not None
         context = self.workspace / "auto_research" / "state" / "project_context.md"
         agents = self.workspace / ".rac" / "ark_project" / "agents"
-        downstream = ("experimenter", "planner", "reviewer", "writer", "coder")
-        if not context.is_file() or context.stat().st_size == 0:
-            return False
-        return all(
-            (prompt := agents / f"{name}.prompt").is_file()
-            and "## Project-Specific Knowledge" in prompt.read_text(encoding="utf-8")
-            for name in downstream
-        )
+        missing = []
+        if not context.is_file() or not context.read_text(encoding="utf-8").strip():
+            missing.append(context)
+        for name in ("experimenter", "planner", "reviewer", "writer", "coder"):
+            prompt = agents / f"{name}.prompt"
+            if not prompt.is_file() or not self._research_specialization_section(prompt.read_text(encoding="utf-8")):
+                missing.append(prompt)
+        return missing
+
+    def _restore_native_research_specializations(self) -> None:
+        """Hand native on-disk sections to existing prompts when the return was a receipt."""
+        assert self.workspace is not None
+        state = self.workspace / "auto_research" / "state"
+        for prompt in self._missing_research_specializations():
+            source = state / f"{prompt.stem}_specialization.md"
+            if prompt.suffix != ".prompt" or not prompt.is_file() or not source.is_file():
+                continue
+            section = self._research_specialization_section(source.read_text(encoding="utf-8"))
+            if section:
+                with prompt.open("a", encoding="utf-8") as handle:
+                    handle.write(f"\n\n{section}\n")
 
     def _run_native_research_specialization(self) -> str:
         """Run ARK's native research compiler before RAC schedules later roles.
@@ -429,6 +465,9 @@ class ArkBridge(HostBridge):
         if not callable(research_phase):
             raise RuntimeError("ARK orchestrator does not expose its native research phase")
         research_phase()
+        if terminal_error := getattr(self.orchestrator, "_terminal_error", None):
+            raise RuntimeError(str(terminal_error))
+        self._restore_native_research_specializations()
 
         # A resumed/partially initialized project may already have context while
         # one or more prompt append operations were interrupted.  ARK's research
@@ -439,8 +478,12 @@ class ArkBridge(HostBridge):
             specialize = getattr(self.orchestrator, "_specialize_agent_prompts", None)
             if callable(specialize):
                 specialize()
-        if not self._research_prompts_specialized():
-            raise RuntimeError("ARK researcher did not specialize every downstream agent prompt")
+                if terminal_error := getattr(self.orchestrator, "_terminal_error", None):
+                    raise RuntimeError(str(terminal_error))
+                self._restore_native_research_specializations()
+        missing = self._missing_research_specializations()
+        if missing:
+            raise RuntimeError("ARK researcher specialization is incomplete: " + ", ".join(path.name for path in missing))
 
         context = self.workspace / "auto_research" / "state" / "project_context.md"
         return (
@@ -485,8 +528,14 @@ class ArkBridge(HostBridge):
         markdown_source = source.parent / ".report.source.tex"
         try:
             markdown_source.write_text(self._markdown_latex_source(source), encoding="utf-8")
+            command = ["pandoc", "--from=latex", "--to=gfm", "--wrap=none", f"--output={temporary.name}", markdown_source.name]
+            bibliography_names = [name.strip() for group in re.findall(r"\\bibliography\{([^}]+)\}", source.read_text(encoding="utf-8"))
+                                  for name in group.split(",")]
+            if bibliography_names:
+                command += ["--citeproc", "--metadata=reference-section-title:References"]
+                command += [f"--bibliography={name if name.endswith('.bib') else name + '.bib'}" for name in bibliography_names]
             subprocess.run(
-                ["pandoc", "--from=latex", "--to=gfm", "--wrap=none", f"--output={temporary.name}", markdown_source.name],
+                command,
                 cwd=source.parent,
                 check=True,
             )
@@ -528,7 +577,8 @@ class ArkBridge(HostBridge):
             labels = [str(citation_numbers.get(key, key)) for key in keys]
             return "[" + ", ".join(labels) + "]"
 
-        text = re.sub(r"\\cite(?:\[[^]]*\])?\{([^}]+)\}", replace_citation, text)
+        if bibliography:
+            text = re.sub(r"\\cite(?:\[[^]]*\])?\{([^}]+)\}", replace_citation, text)
         aux = source.with_suffix(".aux")
         if aux.is_file():
             try:
@@ -579,8 +629,7 @@ class ArkBridge(HostBridge):
                 # Metrics are optional instrumentation. Missing or partially written
                 # state must retain the conservative one-request-per-phase fallback.
                 return parsed
-            if count:
-                usage["model_requests"] = count
+            usage["model_requests"] = count
             return parsed
 
         parse_output._rac_counted = True

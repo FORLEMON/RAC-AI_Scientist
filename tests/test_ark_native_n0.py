@@ -77,6 +77,23 @@ class NativeOnlyBridge:
 
 
 class ArkNativeN0Tests(unittest.TestCase):
+    def test_native_terminal_error_is_not_reported_as_a_review_limit(self):
+        for error_field in ("_terminal_error", "_run_fatal"):
+            with self.subTest(field=error_field), tempfile.TemporaryDirectory() as raw:
+                bridge = object.__new__(ArkBridge)
+                bridge.workspace = Path(raw)
+                bridge.native_mode = True
+                bridge.orchestrator = types.SimpleNamespace(
+                    run=lambda: None, _terminal_error=None, _run_fatal=None,
+                    _agent_stats=[], iteration=NATIVE_REVIEW_ITERATIONS,
+                    load_paper_state=lambda: {"status": "in_progress", "current_score": 0})
+                setattr(bridge.orchestrator, error_field, "APIError: provider stopped the run")
+                with patch.object(bridge, "_normalize_report") as normalize:
+                    result = bridge.run_native()
+                self.assertEqual(result.status, "failed")
+                self.assertIn("APIError", result.reason)
+                normalize.assert_not_called()
+
     def test_every_ark_capability_has_an_explicit_successor(self):
         manifest = Path(__file__).resolve().parents[1] / "configs" / "hosts" / "ark.json"
         capability_ids = {

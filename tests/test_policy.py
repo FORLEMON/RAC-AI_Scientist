@@ -160,12 +160,44 @@ class PolicyTests(unittest.TestCase):
         cp = checkpoint([Issue("I-1", "experiment", "missing baseline")])
         policy = SharedPolicy(Condition.R5)
         decision = policy.decide(cp)
-        before = ArtifactRecord("r", "outputs/result.json", "result", "old", 20)
-        after = ArtifactRecord("r", "outputs/result.json", "result", "new", 20)
+        before = ArtifactRecord("r", "results", "result", "old", 20)
+        after = ArtifactRecord("r", "results", "result", "new", 20)
         result = InvocationResult("run", "", [before], [after], timed_out=True)
         evaluated = policy.evaluate(cp, decision, result)
         self.assertIs(evaluated.action, Action.RECOVER)
         self.assertEqual(evaluated.verification.verdict.value, "refuted")
+
+    def test_mixed_review_issues_are_scoped_to_the_selected_role(self):
+        capabilities = capability_cards(load_host_manifest(
+            Path(__file__).resolve().parents[1] / "configs/hosts/ark.json"))
+        issues = [Issue(f"review:{kind}", kind, f"fix {kind}")
+                  for kind in ("figure", "methodology", "writing", "execution")]
+        cp = Checkpoint("ep", 4, "finish research", "writer", [], issues, budget(), capabilities)
+        policy = SharedPolicy(Condition.R5)
+        decision = policy.decide(cp)
+        self.assertEqual(decision.capability_id, "writer")
+        self.assertEqual(decision.contract.issue_ids, ("review:writing",))
+        self.assertIn("only these scoped issues", decision.contract.objective)
+        self.assertIn("review:writing: fix writing", decision.contract.objective)
+        self.assertNotIn("review:execution", decision.contract.objective)
+        self.assertNotIn("fix execution", decision.contract.objective)
+        issues[-1].attempts = 1
+        decision = policy.decide(cp)
+        self.assertEqual(decision.capability_id, "coder")
+        self.assertEqual(set(decision.contract.issue_ids), {"review:figure", "review:execution"})
+
+    def test_authority_violation_escalates_instead_of_retrying_or_recovering(self):
+        for condition in (Condition.R4, Condition.R5):
+            for output, timed_out in (("done", False), ("", True)):
+                with self.subTest(condition=condition, output=output):
+                    cp = checkpoint()
+                    policy = SharedPolicy(condition)
+                    decision = policy.decide(cp)
+                    result = InvocationResult("write", output, [], [
+                        ArtifactRecord("report", "report", "terminal_report", "new", 300),
+                        ArtifactRecord("code", "code/main.py", "code", "new", 20),
+                    ], timed_out=timed_out)
+                    self.assertIs(policy.evaluate(cp, decision, result).action, Action.ESCALATE)
 
     def test_error_cannot_be_overridden_by_satisfied_artifact_evidence(self):
         cp = checkpoint()
@@ -188,6 +220,16 @@ class PolicyTests(unittest.TestCase):
         evaluated = policy.evaluate(cp, decision, result)
         self.assertIs(evaluated.action, Action.STOP)
         self.assertIn("402", evaluated.reason)
+
+    def test_native_terminal_error_stops_without_retry_or_recovery(self):
+        cp = checkpoint()
+        for condition in (Condition.R4, Condition.R5):
+            policy = SharedPolicy(condition)
+            decision = policy.decide(cp)
+            result = InvocationResult("write", "", [], [
+                ArtifactRecord("report", "report", "terminal_report", "new", 300),
+            ], error="native provider rejected the request", terminal_error=True)
+            self.assertIs(policy.evaluate(cp, decision, result).action, Action.STOP)
 
     def test_verifier_rejects_undeclared_canonical_write(self):
         contract = SharedPolicy(Condition.R3).decide(checkpoint()).contract

@@ -67,6 +67,8 @@ class SharedPolicy:
     ) -> CoordinationDecision:
         if result.error and "Error code: 402" in result.error:
             return CoordinationDecision(Action.STOP, None, "model transport rejected further requests (HTTP 402)", decision.contract)
+        if result.error and result.terminal_error:
+            return CoordinationDecision(Action.STOP, None, result.error, decision.contract)
         if not self.condition.enables("verifier"):
             if result.error or result.timed_out:
                 return CoordinationDecision(Action.STOP, None, result.error or "capability timed out")
@@ -83,6 +85,9 @@ class SharedPolicy:
                 return CoordinationDecision(Action.STOP, None, "quality threshold and evidence contract are satisfied", decision.contract, verification)
             action = Action.STOP if result.proposed_done else Action.REVERIFY
             return CoordinationDecision(action, None, verification.reason, decision.contract, verification)
+
+        if any(check.name == "declared_writes_only" and not check.passed for check in verification.checks):
+            return CoordinationDecision(Action.ESCALATE, None, "capability wrote outside its declared authority", decision.contract, verification)
 
         changed = changed_artifacts(result)
         if self.condition.enables("recovery") and changed and (result.timed_out or not result.output.strip()):
@@ -137,10 +142,20 @@ class SharedPolicy:
 
     @staticmethod
     def _contract(checkpoint: Checkpoint, card: CapabilityCard) -> WorkContract:
-        issue_ids = tuple(item.issue_id for item in checkpoint.issues if not item.resolved)
+        scoped_issues = tuple(
+            item for item in checkpoint.issues
+            if not item.resolved and (
+                item.issue_id == f"native:{card.capability_id}"
+                or (not item.issue_id.startswith("native:") and
+                    any(tag in card.tags for tag in (item.required_tags or ISSUE_TAGS.get(item.kind, (item.kind,)))))
+            )
+        )
+        issue_ids = tuple(item.issue_id for item in scoped_issues)
         objective = checkpoint.objective
         if issue_ids:
-            objective += "; resolve issues " + ", ".join(issue_ids)
+            objective += "; resolve only these scoped issues:\n" + "\n".join(
+                f"- {item.issue_id}: {item.summary}" for item in scoped_issues
+            )
         if "finalize" in card.tags and "terminal_review" in card.tags:
             evidence = (
                 EvidenceRequirement("terminal_report", minimum_bytes=200),
