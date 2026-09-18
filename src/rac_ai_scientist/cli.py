@@ -117,9 +117,17 @@ def _score_episode(args: argparse.Namespace) -> int:
         encoding="utf-8",
     )
     sys.path.insert(0, str(benchmark))
-    from evaluation.score import score_workspace
+    from evaluation import score as score_module
 
-    result = score_workspace(workspace)
+    # Provider adaptation lives in RAC, never in the pinned benchmark checkout.
+    # The default provider remains available for local/offline benchmark use.
+    from .judge import assert_complete_score, configure_researchclawbench_scorer
+
+    configure_researchclawbench_scorer(score_module)
+    result = score_module.score_workspace(workspace)
+    if not isinstance(result, dict):
+        raise RuntimeError("ResearchClawBench returned a non-object score result")
+    assert_complete_score(result)
     score_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(result, indent=2, ensure_ascii=False))
     return 2 if "error" in result else 0
