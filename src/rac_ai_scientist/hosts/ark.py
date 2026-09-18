@@ -62,6 +62,7 @@ class ArkBridge(HostBridge):
         self.open_issues: list[Issue] = []
         self.native_mode = False
         self._pending_transition: tuple[str, list[Issue]] | None = None
+        self.failed_invocations: list[dict[str, Any]] = []
         self.condition = Condition.N0
         self.sharednet: SharedNetSession | None = None
 
@@ -144,6 +145,7 @@ class ArkBridge(HostBridge):
         )
         self.started = time.monotonic()
         self._pending_transition = None
+        self.failed_invocations = []
         self.open_issues = [] if native else [Issue("native:researcher", "native_requirement", "initial research framing is incomplete", required_tags=("planning",))]
         if not native and self.condition.enables("runtime_communication"):
             room_id = os.environ.get("SHAREDNET_ROOM_ID", "").strip()
@@ -236,6 +238,7 @@ class ArkBridge(HostBridge):
             list(self.open_issues),
             remaining,
             self.cards,
+            history=list(self.failed_invocations),
             terminal=False,
         )
 
@@ -282,6 +285,8 @@ class ArkBridge(HostBridge):
             else:
                 output = self.orchestrator.run_agent(capability_id, prompt, timeout=timeout)
             timed_out = not output.strip() and time.monotonic() - started >= max(1, timeout - 1)
+            if timed_out:
+                metrics["native_timeout_continuable"] = 1.0
             if capability_id == "reviewer":
                 review_text = self._review_text(output, previous=prior_review)
                 self._persist_output(capability_id, review_text)
@@ -379,6 +384,46 @@ class ArkBridge(HostBridge):
                 accepted=False,
                 reason=evaluation.reason,
                 next_role=result.proposed_next,
+            )
+
+    def fail_invocation(self, result: InvocationResult, evaluation: CoordinationDecision) -> None:
+        """Mirror native ARK: mark an empty timed-out step failed and continue."""
+        if not result.timed_out or self.condition is not Condition.R1:
+            self.reject_invocation(result, evaluation)
+            return
+
+        next_capability = self._successor(result.capability_id)
+        failure = {
+            "hop": self.hop - 1,
+            "capability_id": result.capability_id,
+            "status": "failed",
+            "reason": "capability timed out",
+            "next_capability_id": next_capability,
+        }
+        self.failed_invocations.append(failure)
+        assert self.workspace is not None
+        failure_path = self.workspace / "state" / "ark" / "failures.jsonl"
+        failure_path.parent.mkdir(parents=True, exist_ok=True)
+        with failure_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(failure, sort_keys=True) + "\n")
+
+        self.native_capability = next_capability
+        self.open_issues = [
+            Issue(
+                f"native:{next_capability}",
+                "native_requirement",
+                f"{next_capability} work remains after {result.capability_id} failed",
+                required_tags=REQUIRED_TAGS[next_capability],
+            )
+        ]
+        self._pending_transition = None
+        sharednet = getattr(self, "sharednet", None)
+        if sharednet is not None:
+            sharednet.disposition(
+                self.hop - 1,
+                accepted=False,
+                reason=evaluation.reason,
+                next_role=next_capability,
             )
 
     def _successor(self, capability_id: str) -> str:
