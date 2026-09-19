@@ -51,6 +51,9 @@ class FakeOrchestrator:
     def load_paper_state(self):
         return {"status": "accepted", "current_score": 8.5}
 
+    def run_agent(self, *args, **kwargs):
+        raise AssertionError("this native-run fixture does not invoke a phase agent")
+
 
 class FakeOpenHandsCLI:
     def parse_output(self, stdout):
@@ -84,7 +87,8 @@ class ArkNativeN0Tests(unittest.TestCase):
                 bridge.workspace = Path(raw)
                 bridge.native_mode = True
                 bridge.orchestrator = types.SimpleNamespace(
-                    run=lambda: None, _terminal_error=None, _run_fatal=None,
+                    run=lambda: None, run_agent=lambda *args, **kwargs: None,
+                    _terminal_error=None, _run_fatal=None,
                     _agent_stats=[], iteration=NATIVE_REVIEW_ITERATIONS,
                     load_paper_state=lambda: {"status": "in_progress", "current_score": 0})
                 setattr(bridge.orchestrator, error_field, "APIError: provider stopped the run")

@@ -390,7 +390,7 @@ def _doctor_host(args: argparse.Namespace) -> int:
         "ark": (("yaml", "litellm"), ("openhands",)),
         "agent_laboratory": (("openai", "torch", "yaml", "pypdf"), ()),
         "data_to_paper": (("openai", "pandas", "PySide6"), ("pdflatex",)),
-        "ai_researcher": (("litellm", "pydantic", "tiktoken", "torch"), ()),
+        "ai_researcher": (("litellm", "pydantic", "tiktoken", "torch", "docling", "huggingface_hub"), ()),
         "evo_scientist": (("deepagents", "langchain", "langgraph", "yaml"), ()),
         "auto_research_claw": (("yaml", "rich", "numpy"), ()),
     }
@@ -405,6 +405,22 @@ def _doctor_host(args: argparse.Namespace) -> int:
         print(f"[BLOCKED] missing executable: {name}")
     if missing_modules or missing_commands:
         return 2
+    if args.host == "ai_researcher":
+        from huggingface_hub import snapshot_download
+        from huggingface_hub.errors import LocalEntryNotFoundError
+
+        for repo_id, revision in (("docling-project/docling-layout-heron", "main"),
+                                  ("docling-project/docling-models", "v2.3.0")):
+            try:
+                snapshot_download(repo_id, revision=revision, local_files_only=True)
+            except LocalEntryNotFoundError:
+                print(f"[BLOCKED] Docling conversion asset missing: {repo_id}@{revision}")
+                return 2
+        try:
+            importlib.import_module("cv2")
+        except ImportError as exc:
+            print(f"[BLOCKED] Docling OpenCV runtime cannot load: {exc}")
+            return 2
     print("[OK] host runtime prerequisites are discoverable")
     return 0
 

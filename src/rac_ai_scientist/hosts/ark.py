@@ -39,6 +39,10 @@ REQUIRED_TAGS = {
 }
 
 
+class _NativeAgentTerminated(BaseException):
+    """Escape native phase repair handlers; caught only by run_native."""
+
+
 class ArkBridge(HostBridge):
     """ARK adapter with a host-owned N0 path and capability-level RAC path."""
 
@@ -157,8 +161,24 @@ class ArkBridge(HostBridge):
         usage_before = self._usage_totals()
         started = time.monotonic()
 
-        self.orchestrator.run()
-        native_error = getattr(self.orchestrator, "_run_fatal", None) or getattr(self.orchestrator, "_terminal_error", None)
+        native_error = None
+        native_run_agent = self.orchestrator.run_agent
+
+        def run_agent(*args, **kwargs):
+            result = native_run_agent(*args, **kwargs)
+            error = getattr(self.orchestrator, "_run_fatal", None) or getattr(self.orchestrator, "_terminal_error", None)
+            if error:
+                raise _NativeAgentTerminated(str(error))
+            return result
+
+        self.orchestrator.run_agent = run_agent
+        try:
+            self.orchestrator.run()
+        except _NativeAgentTerminated as error:
+            native_error = str(error)
+        finally:
+            self.orchestrator.run_agent = native_run_agent
+        native_error = native_error or getattr(self.orchestrator, "_run_fatal", None) or getattr(self.orchestrator, "_terminal_error", None)
         if not native_error:
             self._normalize_report()
 

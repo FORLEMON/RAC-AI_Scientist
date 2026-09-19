@@ -28,6 +28,25 @@ REQUIRED_TAGS = {
 }
 
 
+def _install_pdf_asset_error() -> None:
+    """Keep an offline Docling asset miss distinct from a missing input PDF."""
+    from huggingface_hub.errors import LocalEntryNotFoundError
+    from research_agent.inno.environment.markdown_browser.mdconvert import PdfConverter
+
+    original = PdfConverter.convert
+    if getattr(original, "_rac_pdf_asset_error", False):
+        return
+
+    def convert(converter, *args, **kwargs):
+        try:
+            return original(converter, *args, **kwargs)
+        except LocalEntryNotFoundError as exc:
+            raise RuntimeError("Docling conversion asset missing from the offline cache; prepare the image assets before research.") from exc
+
+    convert._rac_pdf_asset_error = True
+    PdfConverter.convert = convert
+
+
 class _LocalCommandEnv:
     """AI-Researcher's DockerEnv protocol implemented inside its host container."""
     def __init__(self, root: Path, timeout: int):
@@ -99,6 +118,7 @@ class AIResearcherBridge(HostBridge):
         native.mkdir(exist_ok=True)
         code_env = _LocalCommandEnv(self.workspace, max(1, min(1800, int(self.initial_budget.wall_seconds))))
         from research_agent.inno.environment.markdown_browser import RequestsMarkdownBrowser
+        _install_pdf_asset_error()
         file_env = RequestsMarkdownBrowser(local_root=str(self.workspace.parent), workplace_name=self.workspace.name)
         file_env.local_workplace = str(self.workspace)
         file_env.docker_workplace = str(self.workspace)
@@ -149,7 +169,7 @@ class AIResearcherBridge(HostBridge):
             result = self.invoke(capability_id, None)
             iterations += 1
             if result.error:
-                error = result.error
+                error = f"{capability_id}: {result.error}"
                 break
         report = self.workspace / "report" / "report.md"
         report_text = report.read_text(encoding="utf-8", errors="replace").strip() if report.is_file() else ""

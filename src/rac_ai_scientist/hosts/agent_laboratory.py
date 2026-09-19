@@ -59,15 +59,34 @@ def _install_arxiv_transport() -> None:
             original_init(client, *args, **kwargs)
             client.num_retries = 0  # The native search tool already retries three times.
             client._session = _ArxivTimedSession(client._session)
+            client._rac_search_error = None
 
         init._rac_deadline = True
         arxiv.Client.__init__ = init
 
+    original_results = arxiv.Client.results
+    if not getattr(original_results, "_rac_search_cause", False):
+        def results(client, *args, **kwargs):
+            client._rac_search_error = None
+            try:
+                yield from original_results(client, *args, **kwargs)
+            except Exception as exc:
+                # The native search catches this exception and returns None after retries.
+                client._rac_search_error = exc
+                raise
+
+        results._rac_search_cause = True
+        arxiv.Client.results = results
+
     original_search = ArxivSearch.find_papers_by_str
     if not getattr(original_search, "_rac_error", False):
         def find_papers_by_str(search, query, N=20):
+            search.sch_engine._rac_search_error = None
             papers = original_search(search, query, N)
             if papers is None:
+                cause = search.sch_engine._rac_search_error
+                if cause is not None:
+                    raise RuntimeError(f"arXiv API search failed after native retries: {type(cause).__name__}: {cause}") from cause
                 raise RuntimeError("arXiv API search failed after native retries")
             return papers
 
@@ -228,8 +247,10 @@ class AgentLaboratoryBridge(HostBridge):
         previous = Path.cwd()
         try:
             os.chdir(self.workspace)
-            self.workflow.perform_research()
-            self._persist_products()
+            try:
+                self.workflow.perform_research()
+            finally:
+                self._persist_products()
             self._normalize_report()
             self.terminal = True
             self._save()

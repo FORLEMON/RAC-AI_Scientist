@@ -137,6 +137,7 @@ class ToolArgumentTests(unittest.TestCase):
             self.assertEqual(result.status, "failed")
             self.assertEqual(result.native_status, "failed")
             self.assertEqual(result.native_iterations, 1)
+            self.assertIn("survey: bad tool response", result.reason)
 
     def test_tool_request_is_not_a_completed_research_report(self):
         with tempfile.TemporaryDirectory() as directory:

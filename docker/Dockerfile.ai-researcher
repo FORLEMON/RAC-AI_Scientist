@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1.7
 FROM python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 RAC_HOST_ROOT=/opt/host
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 RAC_HOST_ROOT=/opt/host HF_HOME=/opt/hf-cache
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git tree poppler-utils texlive-latex-base \
+    build-essential git tree poppler-utils texlive-latex-base libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=host . /opt/host
@@ -14,7 +14,12 @@ COPY configs /opt/integration/configs
 COPY upstream.lock.json /opt/integration/upstream.lock.json
 
 RUN python -m pip install --no-cache-dir -e /opt/host -e /opt/integration \
+        'docling==2.70.0' 'huggingface_hub==0.36.2' \
     && python -m pip install --no-cache-dir 'markdownify==0.12.1'
+
+# Cache the two default PDF assets used by this Docling version before research.
+RUN python -c "from docling.models.stages.layout.layout_model import LayoutModel; from docling.models.stages.table_structure.table_structure_model import TableStructureModel; LayoutModel.download_models(); TableStructureModel.download_models()" \
+    && chmod -R a+rX /opt/hf-cache
 
 WORKDIR /opt/integration
 ENTRYPOINT ["rac-ai-scientist"]
