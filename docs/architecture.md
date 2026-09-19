@@ -1,14 +1,13 @@
 # Architecture and experimental boundary
 
-## One policy, six host interfaces
+## One policy, five active hosts
 
-For R1--R5, the common runner owns the episode loop. ARK additionally publishes
+For R1--R5, the common runner owns the episode loop. Every active host publishes
 typed work requests, results, and accept/reject dispositions in a caller-selected
-SharedNet Room. At each hop the runner requests a normalized
-checkpoint from the host bridge. The checkpoint contains the objective, native
-stage, persisted artifact manifest, unresolved issues, remaining budget, and
-capability cards. The selected condition determines which common mechanisms may
-run.
+SharedNet Room. At each hop the runner requests a normalized checkpoint from the
+host bridge. The checkpoint contains the objective, native stage, persisted
+artifact manifest, unresolved issues, remaining budget, and capability cards.
+The selected condition determines which common mechanisms may run.
 
 ```text
 ResearchClawBench task workspace
@@ -23,8 +22,11 @@ ResearchClawBench task workspace
       HostBridge protocol
        |-- ARK                 |-- AI-Researcher
        |-- Agent Laboratory    |-- EvoScientist
-       |-- data-to-paper       `-- AutoResearchClaw
+       `-- AutoResearchClaw
 ```
+
+The data-to-paper bridge remains available only to reproduce historical runs;
+it is excluded from the active matrix and does not join SharedNet.
 
 The bridge owns translation, not policy. It may:
 
@@ -40,7 +42,7 @@ classify issues for routing, or decide when the episode stops.
 
 - **N0** uses the host's complete native scheduler without passing phase
   transitions through the shared RAC policy. ARK, Agent Laboratory,
-  data-to-paper, AutoResearchClaw, and EvoScientist enter their top-level native
+  AutoResearchClaw, and EvoScientist enter their top-level native
   lifecycle once. For ARK this is one `Orchestrator.run()` lifecycle with native
   caps of three development iterations and three paper-review iterations.
   AI-Researcher's cross-benchmark compatibility path preserves its MetaChain

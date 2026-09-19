@@ -16,6 +16,7 @@ from ..issues import extract_review_issues, parse_review_score
 from ..manifest import capability_cards, load_host_manifest
 from ..reproducibility import seed_runtime
 from ..schemas import Budget, Checkpoint, InvocationResult, Issue, NativeRunResult, Usage, WorkContract
+from .ark import render_contract_prompt
 
 
 ORDER = ("scope", "literature", "synthesis", "design", "experiment", "analysis", "writing", "finalize")
@@ -212,9 +213,20 @@ class AutoResearchClawBridge(HostBridge):
         started, output, error = time.monotonic(), "", None
         proposed_done = False
         metrics: dict[str, float] = {}
+        original_config = self.config
         try:
             from researchclaw.pipeline.executor import execute_stage
             from researchclaw.pipeline.stages import Stage, StageStatus
+            if getattr(self, "sharednet", None) is not None:
+                coordination_prompt = render_contract_prompt(self.objective, capability_id, contract)
+                coordination_prompt = self.communication_prompt(capability_id, coordination_prompt, contract)
+                self.config = replace(
+                    self.config,
+                    research=replace(
+                        self.config.research,
+                        topic=f"{self.config.research.topic}\n\n{coordination_prompt}",
+                    ),
+                )
             first, last = STAGE_RANGES[capability_id]
             if self.rollback_stage is not None and first <= self.rollback_stage <= last:
                 first = self.rollback_stage
@@ -276,6 +288,8 @@ class AutoResearchClawBridge(HostBridge):
                     self.terminal = True
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
+        finally:
+            self.config = original_config
         self.hop += 1
         after = snapshot_workspace(self.workspace)
         return InvocationResult(capability_id, output, before, after, Usage(

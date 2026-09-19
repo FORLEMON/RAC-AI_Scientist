@@ -1,9 +1,10 @@
 # RAC × AI Scientist
 
 This repository is the integration and evaluation layer for applying Runtime
-Agent Coordination (RAC) to six AI-scientist hosts—ARK, Agent Laboratory,
-data-to-paper, AI-Researcher, EvoScientist, and AutoResearchClaw—and evaluating
-them on ResearchClawBench.
+Agent Coordination (RAC) to five active AI-scientist hosts—ARK, Agent
+Laboratory, AI-Researcher, EvoScientist, and AutoResearchClaw—and evaluating
+them on ResearchClawBench. The earlier data-to-paper integration remains for
+historical reproducibility but is excluded from new experiments.
 
 The repository deliberately keeps upstream projects separate. The integration
 package owns the shared N0–R5 policy, schemas, accounting, host bridges, and
@@ -37,12 +38,12 @@ benchmark schema and nested Docker layout; its N0 compatibility path keeps the
 native MetaChain agents and fixed Level-1 ordering while mapping a sanitized
 ResearchClawBench workspace into that flow. It is reported explicitly as a
 compatibility-native run, not as an unmodified invocation of the upstream CLI.
-R1--R5 continue to use the capability-level RAC runner for every host.  The
-ARK bridge uses a SharedNet Room as the communication plane for R1--R5 while
-RAC remains the routing, verification, transaction, and stopping control plane.
-R1 keeps ARK's declared fixed successor at every hop; runtime routing begins at
-R2. Other host bridges retain their existing capability transport until they
-gain a host-specific SharedNet adapter.
+R1--R5 continue to use the capability-level RAC runner for every active host.
+All five active bridges use a fresh SharedNet Room as the communication plane
+while RAC remains the routing, verification, transaction, and stopping control
+plane. R1 keeps each host's declared fixed successor at every hop; runtime
+routing begins at R2. data-to-paper does not join SharedNet and is not part of
+the active experiment matrix.
 
 ## Repository boundary
 
@@ -76,7 +77,7 @@ revisions, host environments, credentials, task selection, and budget fields are
 explicitly configured.
 
 To materialize resolved upstream revisions, run `python scripts/bootstrap.py`.
-The seven live dependencies are revision-pinned. The private/unpublished RAC
+The collected dependencies are revision-pinned. The private/unpublished RAC
 research snapshot is optional because the runnable experiment profile lives in
 this repository; `--allow-floating` remains an explicit, non-reproducible
 development escape hatch.
@@ -109,8 +110,9 @@ rac-ai-scientist run-one \
   --max-wall-seconds 14400 --max-hops 20
 ```
 
-The command requires `AGENT_MODEL_NAME` and `AGENT_API_KEY`. For ARK R1--R5,
-create a fresh Room per episode and put its settings in `<task-dir>/.env`:
+The command requires `AGENT_MODEL_NAME` and `AGENT_API_KEY`. For every active
+host's R1--R5 episode, create a fresh Room and put its settings in
+`<task-dir>/.env`:
 
 ```dotenv
 SHAREDNET_ROOM_ID=rom_example20260917R5

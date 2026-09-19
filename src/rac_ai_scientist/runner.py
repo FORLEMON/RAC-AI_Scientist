@@ -64,6 +64,7 @@ class EpisodeRunner:
             transaction = WorkspaceTransaction(self.bridge.transaction_workspace())
             try:
                 result = self.bridge.invoke(decision.capability_id, decision.contract)
+                self.bridge.publish_invocation(result)
                 self.ledger.append({"type": "invocation", "hop": invocations, "payload": result})
                 pending = self.policy.evaluate(checkpoint, decision, result)
                 self.ledger.append({"type": "evaluation", "hop": invocations, "payload": pending})

@@ -18,11 +18,15 @@ from .runner import EpisodeRunner
 from .sharednet import SharedNetInvite, load_sharednet_env
 from .schemas import Budget, to_jsonable
 from .provenance import tree_hash
-from .hosts.registry import HOST_IDS, local_snapshot_name, make_bridge
+from .hosts.registry import HOST_IDS, SHAREDNET_HOST_IDS, local_snapshot_name, make_bridge
 
 
 def _uses_host_native_n0(host: str, condition: str) -> bool:
     return host in HOST_IDS and condition == "N0"
+
+
+def _uses_sharednet(host: str, condition: Condition | str) -> bool:
+    return host in SHAREDNET_HOST_IDS and Condition.parse(condition).enables("runtime_communication")
 
 
 def _execute_episode(bridge, condition: str, ledger: JsonlLedger, *, hard_hop_limit: int, review_score_threshold: float):
@@ -220,7 +224,7 @@ def _run_one(args: argparse.Namespace) -> int:
     if not objective:
         raise ValueError("ResearchClawBench task has an empty objective")
     condition = Condition.parse(args.condition)
-    uses_sharednet = args.host == "ark" and condition.enables("runtime_communication")
+    uses_sharednet = _uses_sharednet(args.host, condition)
     sharednet_settings: dict[str, str] = {}
     if uses_sharednet:
         sharednet_env_file = (
@@ -236,13 +240,13 @@ def _run_one(args: argparse.Namespace) -> int:
     ).strip() if uses_sharednet else ""
     if uses_sharednet:
         if not sharednet_room_id:
-            raise ValueError("ARK R1-R5 requires SHAREDNET_ROOM_ID in the run-space .env, process environment, or --sharednet-room-id")
+            raise ValueError(f"{args.host} R1-R5 requires SHAREDNET_ROOM_ID in the run-space .env, process environment, or --sharednet-room-id")
         invite_text = (
             sharednet_settings.get("SHAREDNET_INVITE")
             or os.environ.get("SHAREDNET_INVITE", "")
         ).strip()
         if not invite_text:
-            raise ValueError("ARK R1-R5 requires SHAREDNET_INVITE in the run-space .env or process environment")
+            raise ValueError(f"{args.host} R1-R5 requires SHAREDNET_INVITE in the run-space .env or process environment")
         sharednet_base_url = (
             sharednet_settings.get("SHAREDNET_BASE_URL")
             or os.environ.get("SHAREDNET_BASE_URL", "https://www.sharednet.ai")
@@ -325,6 +329,8 @@ def _run_one(args: argparse.Namespace) -> int:
             raise ValueError(f"{args.host} checkout does not match upstream.lock.json")
         initializer = bridge.initialize_native if host_native_n0 else bridge.initialize
         initializer(episode_id=episode_id, workspace=workspace, objective=objective, seed=args.seed)
+        if uses_sharednet:
+            bridge.initialize_communication()
         outcome, native_result = _execute_episode(
             bridge,
             args.condition,

@@ -15,6 +15,13 @@ HOST_SPECS = {
 }
 
 HOST_IDS = tuple(HOST_SPECS)
+SHAREDNET_HOST_IDS = (
+    "ark",
+    "agent_laboratory",
+    "ai_researcher",
+    "evo_scientist",
+    "auto_research_claw",
+)
 
 
 def local_snapshot_name(host_id: str) -> str:

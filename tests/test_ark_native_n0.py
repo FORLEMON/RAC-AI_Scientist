@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from rac_ai_scientist.cli import _execute_episode, _uses_host_native_n0
+from rac_ai_scientist.cli import _execute_episode, _uses_host_native_n0, _uses_sharednet
 from rac_ai_scientist.hosts.ark import (
     NATIVE_DEV_ITERATIONS,
     NATIVE_REVIEW_ITERATIONS,
@@ -112,6 +112,15 @@ class ArkNativeN0Tests(unittest.TestCase):
         ):
             self.assertTrue(_uses_host_native_n0(host, "N0"))
             self.assertFalse(_uses_host_native_n0(host, "R1"))
+
+    def test_all_active_hosts_use_sharednet_only_for_r1_through_r5(self):
+        active = ("ark", "agent_laboratory", "ai_researcher", "evo_scientist", "auto_research_claw")
+        for host in active:
+            self.assertFalse(_uses_sharednet(host, "N0"))
+            for condition in ("R1", "R2", "R3", "R4", "R5"):
+                self.assertTrue(_uses_sharednet(host, condition))
+        for condition in ("N0", "R1", "R2", "R3", "R4", "R5"):
+            self.assertFalse(_uses_sharednet("data_to_paper", condition))
 
     def test_every_host_implements_its_own_native_entrypoint(self):
         for bridge_type in (
