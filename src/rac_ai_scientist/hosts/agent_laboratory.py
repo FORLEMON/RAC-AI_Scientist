@@ -15,6 +15,7 @@ from ..bridge import HostBridge
 from ..manifest import capability_cards, load_host_manifest
 from ..reproducibility import seed_runtime
 from ..schemas import Budget, Checkpoint, InvocationResult, Issue, NativeRunResult, Usage, WorkContract
+from .ark import render_contract_prompt
 
 
 PHASES = (
@@ -317,17 +318,14 @@ class AgentLaboratoryBridge(HostBridge):
         proposed_done = False
         try:
             os.chdir(self.workspace)
-            if contract is not None:
+            phase_prompt = render_contract_prompt(self.objective, capability_id, contract)
+            phase_prompt = self.communication_prompt(capability_id, phase_prompt, contract)
+            if contract is not None or getattr(self, "sharednet", None) is not None:
                 if self._contract_note is None:
                     self._contract_note = {"phases": [], "note": ""}
                     self.workflow.notes.append(self._contract_note)
                 self._contract_note["phases"] = [NATIVE_NAMES[capability_id]]
-                self._contract_note["note"] = (
-                    f"Current RAC work contract objective: {contract.objective}\n"
-                    f"Read from: {', '.join(contract.readable_artifacts)}\n"
-                    f"Write only to: {', '.join(contract.writable_artifacts)}\n"
-                    f"Verify: {', '.join(item.kind for item in contract.required_evidence)}"
-                )
+                self._contract_note["note"] = phase_prompt
             method = getattr(self.workflow, METHODS[capability_id])
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
                 returned = method()

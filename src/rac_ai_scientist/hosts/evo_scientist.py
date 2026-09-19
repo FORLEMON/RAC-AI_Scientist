@@ -189,6 +189,7 @@ class EvoScientistBridge(HostBridge):
         metrics: dict[str, float] = {}
         try:
             prompt = self._prompt(capability_id, contract)
+            prompt = self.communication_prompt(capability_id, prompt, contract)
             result = self._invoke_agent(prompt)
             messages = result.get("messages", []) if isinstance(result, dict) else []
             output = _message_text(messages[-1]) if messages else str(result)

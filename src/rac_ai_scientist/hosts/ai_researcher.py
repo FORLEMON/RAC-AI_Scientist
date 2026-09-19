@@ -236,6 +236,7 @@ class AIResearcherBridge(HostBridge):
             elif capability_id == "review":
                 report = self.workspace / "report" / "report.md"
                 prompt += "\nReport to review:\n" + (report.read_text(encoding="utf-8", errors="replace") if report.is_file() else "[missing]")
+            prompt = self.communication_prompt(capability_id, prompt, contract)
             response = asyncio.run(self.client.run_async(self.agents[capability_id],
                 [{"role": "user", "content": prompt}], context_variables=self.context,
                 model_override=self.model, debug=False))
