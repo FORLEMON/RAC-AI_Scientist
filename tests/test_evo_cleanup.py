@@ -10,7 +10,22 @@ from rac_ai_scientist.schemas import Budget
 
 
 class EvoCleanupTests(unittest.TestCase):
-    def test_custom_openai_model_declares_file_inputs_unsupported(self):
+    def test_evo_image_contains_analysis_dependencies_used_by_native_runs(self):
+        dockerfile = (Path(__file__).parents[1] / 'docker/Dockerfile.evo-scientist').read_text()
+        install = next(line for line in dockerfile.splitlines() if 'pip install' in line)
+        self.assertIn('matplotlib', install.split())
+        self.assertIn('pandas', install.split())
+        self.assertIn('python -m pip freeze > /opt/integration/evo-environment.txt', dockerfile)
+
+    def test_azure_deepseek_v4_models_declare_non_text_inputs_unsupported(self):
+        for model in ('DeepSeek-V4-Pro', 'openai/DeepSeek-V4-Flash-0731'):
+            with self.subTest(model=model):
+                self._assert_model_profile(model, {'image_inputs': False, 'pdf_inputs': False})
+
+    def test_other_deepseek_models_keep_their_native_profile(self):
+        self._assert_model_profile('deepseek-v4.1-flash', None)
+
+    def _assert_model_profile(self, model, expected_profile):
         captured = {}
         package = ModuleType('EvoScientist')
         package.__path__ = []
@@ -34,12 +49,12 @@ class EvoCleanupTests(unittest.TestCase):
                 root / 'upstream',
                 Path(__file__).parents[1] / 'configs/hosts/evo_scientist.json',
                 Budget(20, 1_000_000, 100_000, 10, 100, 10),
-                'DeepSeek-V4-Pro',
+                model,
                 'fake',
             )
             bridge.initialize(episode_id='test', workspace=root / 'workspace', objective='test', seed=0)
 
-        self.assertEqual(captured['profile'], {'pdf_inputs': False})
+        self.assertEqual(captured.get('profile'), expected_profile)
 
     def test_interpreters_close_on_success_and_provider_error(self):
         module = ModuleType('EvoScientist.middleware.code_interpreter')

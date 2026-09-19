@@ -97,7 +97,12 @@ class EvoScientistBridge(HostBridge):
         )
         os.environ["CUSTOM_OPENAI_API_KEY"] = self.api_key
         os.environ["CUSTOM_OPENAI_BASE_URL"] = base_url
-        model_options = {"profile": {"pdf_inputs": False}} if "deepseek" in self.model.lower() else {}
+        # Azure lists these exact deployments as text-input models.
+        # https://learn.microsoft.com/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure
+        azure_text_only = self.model.rsplit("/", 1)[-1].lower() in {
+            "deepseek-v4-pro", "deepseek-v4-flash-0731",
+        }
+        model_options = {"profile": {"image_inputs": False, "pdf_inputs": False}} if azure_text_only else {}
         chat_model = get_chat_model(model=self.model, provider="custom-openai", **model_options)
         self.agent = create_cli_agent(
             workspace_dir=str(self.workspace), config=cfg, chat_model=chat_model
