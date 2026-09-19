@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import shutil
@@ -29,6 +30,40 @@ REQUIRED_TAGS = {
     "experiment": ("experiment", "code"), "analysis": ("analysis",),
     "writing": ("writing", "terminal_review"), "finalize": ("finalize",),
 }
+
+
+def _benchmark_execution_topic(workspace: Path, objective: str) -> str:
+    details: list[str] = []
+    task_info = workspace / "task_info.json"
+    try:
+        payload = json.loads(task_info.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        payload = {}
+    for item in payload.get("data", []) if isinstance(payload, dict) else []:
+        if not isinstance(item, dict):
+            continue
+        path = item.get("path") or (f"data/{item['name']}" if item.get("name") else None)
+        if path:
+            details.append(f"- {path}: {item.get('description', 'supplied benchmark input')}")
+    inputs = "\n".join(details) or "- Inspect the supplied data/ directory before designing the experiment."
+    return (
+        f"{objective.strip()}\n\n"
+        "BENCHMARK EXECUTION CONTRACT (mandatory):\n"
+        "Use only the files already present in this workspace; do not acquire or substitute an external dataset.\n"
+        "Base every numerical claim on measurements from the supplied inputs.\n"
+        "Persist executable code under code/, measured outputs under outputs/, and the final report at report/report.md.\n"
+        "Available benchmark inputs:\n"
+        f"{inputs}"
+    )
+
+
+def _raw_python_codegen_fallback(text: str) -> dict[str, str]:
+    candidate = text.strip()
+    try:
+        ast.parse(candidate)
+    except (SyntaxError, ValueError, TypeError):
+        return {}
+    return {"main.py": candidate} if candidate else {}
 
 
 class AutoResearchClawBridge(HostBridge):
@@ -73,9 +108,10 @@ class AutoResearchClawBridge(HostBridge):
         from researchclaw.config import RCConfig
 
         base_url = os.environ.get("AGENT_API_BASE", "https://api.openai.com/v1")
+        execution_topic = _benchmark_execution_topic(self.workspace, objective)
         data = {
             "project": {"name": episode_id, "mode": "full-auto"},
-            "research": {"topic": objective, "quality_threshold": 0},
+            "research": {"topic": execution_topic, "quality_threshold": 0},
             "runtime": {"timezone": "UTC", "max_parallel_tasks": 1, "retry_limit": 0},
             "notifications": {"channel": "none", "on_stage_start": False, "on_stage_fail": False, "on_gate_required": False},
             "knowledge_base": {"backend": "markdown", "root": str(self.run_dir / "kb")},
@@ -93,6 +129,7 @@ class AutoResearchClawBridge(HostBridge):
         }
         self.config = RCConfig.from_dict(data, project_root=self.workspace, check_paths=False)
         self.adapters = AdapterBundle.from_config(self.config)
+        self._install_codegen_parser_adapter()
         self._install_usage_adapter()
 
     def initialize_native(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
@@ -116,11 +153,21 @@ class AutoResearchClawBridge(HostBridge):
         self._normalize_products()
         report = self.workspace / "report" / "report.md"
         stages_done = sum(1 for result in results if getattr(result.status, "value", result.status) == "done")
-        complete = bool(results) and stages_done == len(results) and report.is_file()
+        failed = next((result for result in results if getattr(result.status, "value", result.status) != "done"), None)
+        complete = bool(results) and failed is None and report.is_file()
+        if complete:
+            reason = "AutoResearchClaw native full-auto pipeline completed"
+        elif failed is not None:
+            stage = getattr(getattr(failed, "stage", None), "name", getattr(failed, "stage", "unknown"))
+            status = getattr(failed.status, "value", failed.status)
+            detail = f": {failed.error}" if getattr(failed, "error", None) else ""
+            reason = f"AutoResearchClaw native stage {stage} {status}{detail}"
+        else:
+            reason = "AutoResearchClaw native pipeline returned without report/report.md"
         self.terminal = True
         return NativeRunResult(
-            status="completed" if complete else "stop",
-            reason="AutoResearchClaw native full-auto pipeline completed" if complete else "AutoResearchClaw native pipeline stopped before completion",
+            status="completed" if complete else "failed",
+            reason=reason,
             native_iterations=len(results),
             artifacts_before=before,
             artifacts_after=snapshot_workspace(self.workspace),
@@ -133,7 +180,7 @@ class AutoResearchClawBridge(HostBridge):
                 cost_source=self.usage.cost_source,
                 token_source=self.usage.token_source,
             ),
-            native_status="completed" if complete else "stopped",
+            native_status="completed" if complete else "failed",
             metrics={"stages_done": float(stages_done), "stages_returned": float(len(results))},
         )
 
@@ -250,8 +297,16 @@ class AutoResearchClawBridge(HostBridge):
             if time.monotonic() - bridge.started >= bridge.initial_budget.wall_seconds:
                 raise TimeoutError("lifecycle wall-time budget exhausted")
             kwargs["model"] = bridge.model
-            kwargs["max_tokens"] = min(int(kwargs.get("max_tokens") or bridge.initial_budget.output_tokens),
-                                        max(1, bridge.initial_budget.output_tokens - bridge.usage.output_tokens))
+            requested = int(kwargs.get("max_tokens") or bridge.initial_budget.output_tokens)
+            # Upstream uses 8192 for code generation.  In practice that often
+            # truncates a multi-file program, so give code/regen calls a safe
+            # floor while leaving short review calls unchanged.
+            if requested >= 8192:
+                requested = max(requested, 16384)
+            kwargs["max_tokens"] = min(
+                requested,
+                max(1, bridge.initial_budget.output_tokens - bridge.usage.output_tokens),
+            )
             response = original(client, messages, **kwargs)
             raw = response.raw if isinstance(response.raw, dict) else {}
             cost = raw.get("response_cost", raw.get("provider_cost"))
@@ -265,6 +320,23 @@ class AutoResearchClawBridge(HostBridge):
             return response
         chat._rac_wrapped = True
         LLMClient.chat = chat
+
+    def _install_codegen_parser_adapter(self) -> None:
+        """Accept a complete raw Python response when upstream omitted fences."""
+        from researchclaw.pipeline import _helpers
+        from researchclaw.pipeline.stage_impls import _code_generation
+
+        original = _code_generation._extract_multi_file_blocks
+        if getattr(original, "_rac_wrapped", False):
+            return
+
+        def parse(text: str):
+            parsed = original(text)
+            return parsed or _raw_python_codegen_fallback(text)
+
+        parse._rac_wrapped = True
+        _helpers._extract_multi_file_blocks = parse
+        _code_generation._extract_multi_file_blocks = parse
 
     def _normalize_products(self) -> None:
         assert self.workspace is not None and self.run_dir is not None

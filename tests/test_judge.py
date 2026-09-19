@@ -50,3 +50,10 @@ class JudgeIntegrationTests(unittest.TestCase):
     def test_valid_zero_score_remains_valid(self):
         assert_complete_score({"items": [{"score": 0, "reasoning": "The report does not establish this claim."}]})
 
+    def test_top_level_error_is_not_a_score(self):
+        with self.assertRaisesRegex(RuntimeError, "top-level error"):
+            assert_complete_score({"error": "HTTP 429", "items": []})
+
+    def test_empty_checklist_is_not_a_complete_score(self):
+        with self.assertRaisesRegex(RuntimeError, "no checklist items"):
+            assert_complete_score({"items": []})

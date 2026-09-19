@@ -52,3 +52,48 @@ class BenchmarkTests(unittest.TestCase):
                 self.skipTest("symbolic links are unavailable on this platform")
             with self.assertRaises(BenchmarkBoundaryError):
                 materialize_rcb_workspace(task, tmp_path / "runs" / "ep")
+
+    def test_materializer_uses_file_contents_over_stale_numeric_metadata(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp_path = Path(raw)
+            task = tmp_path / "tasks" / "Math_000"
+            (task / "data").mkdir(parents=True)
+            sequence = [
+                {"frame": 1, "gt_ids": [1, 2, 3], "detections": [{}, {}]},
+                {"frame": 2, "gt_ids": [1, 2, 3], "detections": [{}, {}]},
+            ]
+            data_path = task / "data" / "simulated_sequence.json"
+            data_path.write_text(json.dumps(sequence), encoding="utf-8")
+            stale_description = "40 frames, 20 objects, and an 85% detection rate"
+            (task / "task_info.json").write_text(
+                json.dumps(
+                    {
+                        "task_id": "Math_000",
+                        "task": "Analyze the sequence.",
+                        "data": [
+                            {
+                                "name": "simulated_sequence.json",
+                                "path": "data/simulated_sequence.json",
+                                "description": stale_description,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            workspace = tmp_path / "runs" / "ep"
+            materialize_rcb_workspace(task, workspace)
+
+            sanitized = json.loads((workspace / "task_info.json").read_text(encoding="utf-8"))
+            item = sanitized["data"][0]
+            self.assertIn("2 frames", item["description"])
+            self.assertIn("3 distinct GT IDs", item["description"])
+            self.assertIn("66.667%", item["description"])
+            self.assertEqual(item["verified_profile"]["gt_instances"], 6)
+            validation = json.loads(
+                (workspace / ".rac" / "input_validation.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(validation["data"][0]["metadata_mismatches"]), 3)
+            original = json.loads((task / "task_info.json").read_text(encoding="utf-8"))
+            self.assertEqual(original["data"][0]["description"], stale_description)

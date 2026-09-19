@@ -194,7 +194,14 @@ def assert_complete_score(result: dict[str, Any]) -> None:
     )
     failures: list[str] = []
 
-    for index, item in enumerate(result.get("items", [])):
+    if result.get("error"):
+        failures.append(f"top-level error: {result['error']}")
+    items = result.get("items")
+    if not isinstance(items, list) or not items:
+        failures.append("score result has no checklist items")
+        items = []
+
+    for index, item in enumerate(items):
         if not isinstance(item, dict):
             failures.append(f"item {index} is not an object")
             continue

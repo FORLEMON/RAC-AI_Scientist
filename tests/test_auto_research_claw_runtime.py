@@ -7,7 +7,7 @@ from enum import IntEnum, Enum
 from pathlib import Path
 from unittest.mock import patch
 
-from rac_ai_scientist.hosts.auto_research_claw import AutoResearchClawBridge
+from rac_ai_scientist.hosts.auto_research_claw import AutoResearchClawBridge, _raw_python_codegen_fallback
 from rac_ai_scientist.schemas import Budget
 from rac_ai_scientist.conditions import Condition
 from rac_ai_scientist.policy import SharedPolicy, verify_result
@@ -112,11 +112,78 @@ class AutoResearchClawRuntimeTests(unittest.TestCase):
             config = types.ModuleType("researchclaw.config")
             adapters.AdapterBundle = types.SimpleNamespace(from_config=lambda value: object())
             config.RCConfig = types.SimpleNamespace(from_dict=lambda value, **kwargs: value)
+            workspace = directory / "workspace"
+            workspace.mkdir()
+            (workspace / "task_info.json").write_text(
+                '{"data":[{"path":"data/sequence.json","description":"verified input"}]}',
+                encoding="utf-8",
+            )
             with patch.dict(sys.modules, {"researchclaw": package, "researchclaw.adapters": adapters, "researchclaw.config": config}), patch.object(
                 bridge, "_install_usage_adapter"
-            ):
-                bridge.initialize(episode_id="ep", workspace=directory / "workspace", objective="track objects", seed=0)
+            ), patch.object(bridge, "_install_codegen_parser_adapter"):
+                bridge.initialize(episode_id="ep", workspace=workspace, objective="track objects", seed=0)
             self.assertEqual(bridge.config["experiment"]["sandbox"]["python_path"], sys.executable)
+            topic = bridge.config["research"]["topic"]
+            self.assertIn("data/sequence.json", topic)
+            self.assertIn("do not acquire or substitute an external dataset", topic)
+
+    def test_codegen_parser_accepts_complete_raw_python(self):
+        source = "from pathlib import Path\n\nPath('result.txt').write_text('ok')\n"
+        self.assertEqual(_raw_python_codegen_fallback(source), {"main.py": source.strip()})
+        self.assertEqual(_raw_python_codegen_fallback("Here is the requested program:"), {})
+
+    def test_codegen_calls_receive_the_larger_output_floor(self):
+        calls = []
+
+        class Response:
+            raw = {}
+            prompt_tokens = 10
+            completion_tokens = 20
+
+        class LLMClient:
+            def chat(self, messages, **kwargs):
+                calls.append(kwargs)
+                return Response()
+
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            manifest = Path(__file__).resolve().parents[1] / "configs/hosts/auto_research_claw.json"
+            bridge = AutoResearchClawBridge(
+                directory, manifest, Budget(10, 1000, 50000, 5, 100, 5), "fake", "FAKE-ONLY"
+            )
+            bridge.started = time.monotonic()
+            module = types.SimpleNamespace(LLMClient=LLMClient)
+            with patch.dict(sys.modules, {"researchclaw.llm.client": module}):
+                bridge._install_usage_adapter()
+                LLMClient().chat([], max_tokens=8192)
+        self.assertEqual(calls[0]["max_tokens"], 16384)
+
+    def test_native_stage_failure_is_reported_as_failed_with_detail(self):
+        class Status(Enum):
+            FAILED = "failed"
+
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            manifest = Path(__file__).resolve().parents[1] / "configs/hosts/auto_research_claw.json"
+            bridge = AutoResearchClawBridge(directory, manifest, Budget(10, 1000, 1000, 5, 100, 5), "fake", "FAKE-ONLY")
+            bridge.workspace = directory
+            bridge.run_dir = directory / "auto_research_claw_native"
+            bridge.run_dir.mkdir()
+            bridge.config = object()
+            bridge.adapters = object()
+            bridge.started = time.monotonic()
+            failed = types.SimpleNamespace(
+                stage=types.SimpleNamespace(name="EXPERIMENT_DESIGN"),
+                status=Status.FAILED,
+                error="regeneration produced no main.py",
+            )
+            runner = types.SimpleNamespace(execute_pipeline=lambda **kwargs: [failed])
+            with patch.dict(sys.modules, {"researchclaw.pipeline.runner": runner}):
+                result = bridge.run_native()
+            self.assertEqual(result.status, "failed")
+            self.assertEqual(result.native_status, "failed")
+            self.assertIn("EXPERIMENT_DESIGN", result.reason)
+            self.assertIn("no main.py", result.reason)
 
 
 if __name__ == "__main__":

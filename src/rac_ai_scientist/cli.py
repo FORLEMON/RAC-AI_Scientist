@@ -87,6 +87,38 @@ def _prepare_task(args: argparse.Namespace) -> int:
     return 0
 
 
+def _write_score_failure(score_path: Path, task_id: str | None, message: str) -> int:
+    result = {"task_id": task_id, "total_score": None, "error": message}
+    score_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 2
+
+
+def _score_preflight(workspace: Path) -> list[str]:
+    errors: list[str] = []
+    required = {
+        "report": workspace / "report" / "report.md",
+        "instructions": workspace / "INSTRUCTIONS.md",
+    }
+    for label, path in required.items():
+        if not path.is_file() or not path.read_text(encoding="utf-8", errors="replace").strip():
+            errors.append(f"missing or empty {label}: {path.relative_to(workspace)}")
+
+    instructions = required["instructions"]
+    if instructions.is_file():
+        text = instructions.read_text(encoding="utf-8", errors="replace").lower()
+        requires_evidence = "persist executable analysis in code/" in text
+        if requires_evidence:
+            evidence = []
+            for name in ("code", "outputs"):
+                root = workspace / name
+                if root.is_dir():
+                    evidence.extend(path for path in root.rglob("*") if path.is_file() and path.stat().st_size > 0)
+            if not evidence:
+                errors.append("no nonempty analysis artifact exists under code/ or outputs/")
+    return errors
+
+
 def _score_episode(args: argparse.Namespace) -> int:
     episode_dir = Path(args.episode_dir).resolve()
     workspace = episode_dir / "workspace"
@@ -94,43 +126,45 @@ def _score_episode(args: argparse.Namespace) -> int:
     if not metadata_path.is_file():
         raise FileNotFoundError(f"missing episode metadata: {metadata_path}")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    assert_no_target_study(workspace)
-    report = workspace / "report" / "report.md"
     score_path = episode_dir / "score.json"
-    if not report.is_file() or not report.read_text(encoding="utf-8", errors="replace").strip():
-        result = {"task_id": metadata.get("task_id"), "total_score": None, "error": "No report found in workspace"}
-        score_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
-        print(json.dumps(result, indent=2))
-        return 2
-    benchmark = Path(args.benchmark).resolve()
-    if not (benchmark / "evaluation" / "score.py").is_file():
-        raise FileNotFoundError(f"ResearchClawBench checkout not found: {benchmark}")
-    (workspace / "_meta.json").write_text(
-        json.dumps(
-            {
-                "run_id": metadata["episode_id"],
-                "task_id": metadata["task_id"],
-                "agent_name": f"{metadata['host']}+{metadata['condition']}",
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    sys.path.insert(0, str(benchmark))
-    from evaluation import score as score_module
+    task_id = metadata.get("task_id")
+    try:
+        assert_no_target_study(workspace)
+        preflight_errors = _score_preflight(workspace)
+        if preflight_errors:
+            return _write_score_failure(score_path, task_id, "; ".join(preflight_errors))
 
-    # Provider adaptation lives in RAC, never in the pinned benchmark checkout.
-    # The default provider remains available for local/offline benchmark use.
-    from .judge import assert_complete_score, configure_researchclawbench_scorer
+        benchmark = Path(args.benchmark).resolve()
+        if not (benchmark / "evaluation" / "score.py").is_file():
+            raise FileNotFoundError(f"ResearchClawBench checkout not found: {benchmark}")
+        (workspace / "_meta.json").write_text(
+            json.dumps(
+                {
+                    "run_id": metadata["episode_id"],
+                    "task_id": metadata["task_id"],
+                    "agent_name": f"{metadata['host']}+{metadata['condition']}",
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        sys.path.insert(0, str(benchmark))
+        from evaluation import score as score_module
 
-    configure_researchclawbench_scorer(score_module)
-    result = score_module.score_workspace(workspace)
-    if not isinstance(result, dict):
-        raise RuntimeError("ResearchClawBench returned a non-object score result")
-    assert_complete_score(result)
-    score_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-    return 2 if "error" in result else 0
+        # Provider adaptation lives in RAC, never in the pinned benchmark checkout.
+        # The default provider remains available for local/offline benchmark use.
+        from .judge import assert_complete_score, configure_researchclawbench_scorer
+
+        configure_researchclawbench_scorer(score_module)
+        result = score_module.score_workspace(workspace)
+        if not isinstance(result, dict):
+            raise RuntimeError("ResearchClawBench returned a non-object score result")
+        assert_complete_score(result)
+        score_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0
+    except Exception as exc:
+        return _write_score_failure(score_path, task_id, f"Scoring failed: {exc}")
 
 
 def _resolve_upstream(root: Path, host: str) -> Path:
