@@ -55,6 +55,7 @@
       "version_observed": "0.3.0",
       "local_snapshot": "EvoScientist-main",
       "tree_sha256": "4f7c72a69bee443c619b59a9c110f799565eabf75d5fdaae74504d8cfe0ecf15",
+      "runtime_tree_sha256": "0fd8cfb5fd2c987d7d95090546497db848dca0b9229c66e077c18b3c90e8b82c",
       "license": "Apache-2.0"
     },
     "auto_research_claw": {

@@ -16,7 +16,10 @@ COPY configs /opt/integration/configs
 COPY upstream.lock.json /opt/integration/upstream.lock.json
 
 RUN python -m pip install --no-cache-dir -r /opt/host/requirements.txt \
-    && python -m pip install --no-cache-dir "pypdf>=5,<7" \
+    && python -m pip install --no-cache-dir \
+        "pypdf>=5,<7" \
+        "Flask>=3,<4" \
+        "Flask-SQLAlchemy>=3,<4" \
     && python -m pip install --no-cache-dir -e /opt/integration
 
 WORKDIR /opt/integration
