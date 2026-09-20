@@ -8,8 +8,8 @@ class MatrixTests(unittest.TestCase):
     def test_cartesian_product_is_deterministic(self):
         config = {
             "experiment_id": "pilot",
-            "hosts": ["ark", "data_to_paper"],
-            "conditions": ["N0", "R5"],
+            "hosts": ["ark", "evo_scientist"],
+            "conditions": ["N0", "R3"],
             "tasks": ["Task_001"],
             "seeds": [7],
             "repeats": 2,

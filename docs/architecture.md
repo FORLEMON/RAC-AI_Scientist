@@ -1,9 +1,9 @@
 # Architecture and experimental boundary
 
-## One policy, five active hosts
+## One policy, three active hosts
 
-For R1--R5, the common runner owns the episode loop. Every active host publishes
-typed work requests, results, and accept/reject dispositions in a caller-selected
+For R1--R3, the common runner owns the episode loop. Every active host publishes
+typed work requests, results, and verification advisories in a caller-selected
 SharedNet Room. At each hop the runner requests a normalized checkpoint from the
 host bridge. The checkpoint contains the objective, native stage, persisted
 artifact manifest, unresolved issues, remaining budget, and capability cards.
@@ -13,20 +13,21 @@ The selected condition determines which common mechanisms may run.
 ResearchClawBench task workspace
               |
               v
-      N0 host scheduler OR R1--R5 common runner
+      N0 host scheduler OR R1--R3 common runner
                          -----> append-only usage/decision ledger
               |
-      shared N0--R5 policy
+      shared N0--R3 policy
               |
               v
-      HostBridge protocol
-       |-- ARK                 |-- AI-Researcher
-       |-- Agent Laboratory    |-- EvoScientist
-       `-- AutoResearchClaw
+       HostBridge protocol
+        |-- ARK
+        |-- Agent Laboratory
+        `-- EvoScientist
 ```
 
-The data-to-paper bridge remains available only to reproduce historical runs;
-it is excluded from the active matrix and does not join SharedNet.
+The data-to-paper, AI-Researcher, and AutoResearchClaw bridges remain available
+only to reproduce historical runs; they are excluded from the active matrix and
+do not join SharedNet.
 
 The bridge owns translation, not policy. It may:
 
@@ -42,23 +43,18 @@ classify issues for routing, or decide when the episode stops.
 
 - **N0** uses the host's complete native scheduler without passing phase
   transitions through the shared RAC policy. ARK, Agent Laboratory,
-  AutoResearchClaw, and EvoScientist enter their top-level native
+  and EvoScientist enter their top-level native
   lifecycle once. For ARK this is one `Orchestrator.run()` lifecycle with native
   caps of three development iterations and three paper-review iterations.
-  AI-Researcher's cross-benchmark compatibility path preserves its MetaChain
-  agent stack and fixed Level-1 ordering because its published launcher cannot
-  consume a generic ResearchClawBench task or run outside its nested benchmark
-  Docker layout. The integration layer records only the native run boundary,
-  artifacts, usage, and terminal state.
+  The integration layer records only the native run boundary, artifacts, usage,
+  and terminal state.
 - **R1** adds SharedNet runtime communication while preserving the host's fixed
   native successor at every hop.
 - **R2** selects from admitted capability cards using the shared policy.
-- **R3** additionally supplies a minimum-scoped contract derived from the chosen
-  card and checkpoint.
-- **R4** fingerprints declared writable artifacts before and after execution and
-  produces `supported`, `refuted`, or `inconclusive`.
-- **R5** may preserve verified partial effects after timeout/empty response and
-  reconstruct a safe next checkpoint.
+- **R3** additionally supplies a minimum-scoped contract and fingerprints
+  artifacts before and after execution. Its `supported`, `refuted`, or
+  `inconclusive` verdict is recorded and injected into the next agent context,
+  but never stops, retries, reroutes, or rolls back the invocation.
 
 ## Benchmark boundary
 
@@ -86,7 +82,7 @@ cross runs only as JSON/JSONL and persisted artifacts.
 1. Freeze upstream provenance and common schemas/invariants.
 2. Implement N0 recording adapters and benchmark-safe workspace materialization.
 3. Expose each host's existing roles as resumable capability calls.
-4. Enable R1--R5 strictly through the shared policy.
+4. Enable R1--R3 strictly through the shared policy.
 5. Add isolated images, one-command smoke runs, and resume-safe batch execution.
 6. Freeze task selection before inspecting condition outcomes and publish hashes,
    ledgers, analysis scripts, and failure-complete reports.

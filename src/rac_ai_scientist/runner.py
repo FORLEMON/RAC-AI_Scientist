@@ -71,6 +71,9 @@ class EpisodeRunner:
                 invocations += 1
 
                 if pending.action in {Action.RETRY, Action.REROUTE, Action.ESCALATE}:
+                    # A verifier rejection returns the workspace to the state
+                    # immediately before this capability and RETRY executes the
+                    # same contracted capability again on the next loop.
                     transaction.rollback()
                     self.bridge.reject_invocation(result, pending)
                 elif pending.action is Action.RECOVER:
@@ -79,11 +82,18 @@ class EpisodeRunner:
                     self.bridge.reject_invocation(result, pending)
                     pending = None
                 elif result.error or result.timed_out:
-                    transaction.rollback()
-                    if result.timed_out and pending.action is Action.REVERIFY:
-                        self.bridge.fail_invocation(result, pending)
+                    if pending.verification is not None:
+                        # R3 verification is advisory, including a refuted
+                        # result caused by a non-terminal invocation error or
+                        # timeout.  Preserve artifacts/state and expose the
+                        # verdict to the next selected capability.
+                        self.bridge.accept_invocation(result, pending)
                     else:
-                        self.bridge.reject_invocation(result, pending)
+                        transaction.rollback()
+                        if result.timed_out and pending.action is Action.REVERIFY:
+                            self.bridge.fail_invocation(result, pending)
+                        else:
+                            self.bridge.reject_invocation(result, pending)
                 else:
                     self.bridge.accept_invocation(result, pending)
             except Exception:

@@ -1,13 +1,13 @@
 # RAC × AI Scientist
 
 This repository is the integration and evaluation layer for applying Runtime
-Agent Coordination (RAC) to five active AI-scientist hosts—ARK, Agent
-Laboratory, AI-Researcher, EvoScientist, and AutoResearchClaw—and evaluating
-them on ResearchClawBench. The earlier data-to-paper integration remains for
-historical reproducibility but is excluded from new experiments.
+Agent Coordination (RAC) to three active AI-scientist hosts—ARK, Agent
+Laboratory, and EvoScientist—and evaluating them on ResearchClawBench. Earlier
+data-to-paper, AI-Researcher, and AutoResearchClaw integrations remain for
+historical reproducibility but are excluded from new experiments.
 
 The repository deliberately keeps upstream projects separate. The integration
-package owns the shared N0–R5 policy, schemas, accounting, host bridges, and
+package owns the shared N0–R3 policy, schemas, accounting, host bridges, and
 experiment runner. A host bridge may serialize native state, invoke an existing
 capability, and return artifacts and usage; it must not contain routing,
 acceptance, recovery, or benchmark-specific policy.
@@ -19,9 +19,7 @@ acceptance, recovery, or benchmark-specific policy.
 | N0 | Native fixed workflow |
 | R1 | SharedNet runtime communication over the native fixed workflow |
 | R2 | R1 + runtime routing |
-| R3 | R2 + scoped work contracts |
-| R4 | R3 + artifact-grounded verification |
-| R5 | R4 + artifact-preserving recovery |
+| R3 | R2 + scoped work contracts + advisory artifact-grounded verification |
 
 Conditions are cumulative. Within a host/task/seed comparison, model, tools,
 permissions, input artifacts, and lifecycle budget must be identical. Router and
@@ -38,12 +36,13 @@ benchmark schema and nested Docker layout; its N0 compatibility path keeps the
 native MetaChain agents and fixed Level-1 ordering while mapping a sanitized
 ResearchClawBench workspace into that flow. It is reported explicitly as a
 compatibility-native run, not as an unmodified invocation of the upstream CLI.
-R1--R5 continue to use the capability-level RAC runner for every active host.
-All five active bridges use a fresh SharedNet Room as the communication plane
-while RAC remains the routing, verification, transaction, and stopping control
+R1--R3 continue to use the capability-level RAC runner for every active host.
+All three active bridges use a fresh SharedNet Room as the communication plane
+while RAC remains the routing, contract, verification, and stopping control
 plane. R1 keeps each host's declared fixed successor at every hop; runtime
-routing begins at R2. data-to-paper does not join SharedNet and is not part of
-the active experiment matrix.
+routing begins at R2. R3 verification is advisory: every verdict is recorded
+and forwarded to the next selected agent, while artifacts are retained and the
+verdict itself never stops, retries, or rolls back a step.
 
 ## Repository boundary
 
@@ -103,7 +102,7 @@ One fully specified episode is launched with:
 
 ```bash
 rac-ai-scientist run-one \
-  --host ark --condition R5 \
+  --host ark --condition R3 \
   --task-dir upstreams/researchclawbench/tasks/Astronomy_000 \
   --max-cost-usd 20 --max-input-tokens 1000000 \
   --max-output-tokens 200000 --max-agent-calls 40 \
@@ -111,12 +110,12 @@ rac-ai-scientist run-one \
 ```
 
 The command requires `AGENT_MODEL_NAME` and `AGENT_API_KEY`. For every active
-host's R1--R5 episode, create a fresh Room and put its settings in
+host's R1--R3 episode, create a fresh Room and put its settings in
 `<task-dir>/.env`:
 
 ```dotenv
-SHAREDNET_ROOM_ID=rom_example20260917R5
-SHAREDNET_INVITE='ROOM=rom_example20260917R5 TOKEN=rit_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA BASE=https://www.sharednet.ai'
+SHAREDNET_ROOM_ID=rom_example20260917R3
+SHAREDNET_INVITE='ROOM=rom_example20260917R3 TOKEN=rit_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA BASE=https://www.sharednet.ai'
 ```
 
 Use `--sharednet-env-file` when the per-run file lives elsewhere. A command-line
@@ -168,17 +167,16 @@ The live container reads `/input/task` and writes to the mounted `/runs`
 directory:
 
 ```bash
-docker compose run --rm <service> run-one --host <host-id> --condition R5 \
+docker compose run --rm <service> run-one --host <host-id> --condition R3 \
   --task-dir /input/task --run-root /runs \
   --max-cost-usd 20 --max-input-tokens 1000000 \
   --max-output-tokens 200000 --max-agent-calls 40 \
   --max-wall-seconds 14400 --max-hops 20
 ```
 
-Service/host-id pairs are `ark`/`ark`, `agent-laboratory`/`agent_laboratory`,
-`data-to-paper`/`data_to_paper`, `ai-researcher`/`ai_researcher`,
-`evo-scientist`/`evo_scientist`, and
-`auto-research-claw`/`auto_research_claw`.
+Active service/host-id pairs are `ark`/`ark`,
+`agent-laboratory`/`agent_laboratory`, and
+`evo-scientist`/`evo_scientist`.
 
 After the evaluated host exits, score it in the separate judge image. Only this
 image contains `target_study`:
@@ -199,8 +197,9 @@ have not been certified merely by the offline unit suite.
   ResearchClawBench scorer may read it.
 - Every episode records the host and RAC source revisions, configuration hash,
   task, seed, condition, budget, usage, terminal status, and artifact hashes.
-- An agent's completion statement is not evidence. R4+ accepts work only from
-  persisted effects checked outside the delegate.
+- An agent's completion statement is not evidence. R3 records an external
+  artifact-grounded verdict, but the verdict is advisory and never discards
+  the agent's persisted work.
 - Failed and budget-exhausted episodes remain in the denominator.
 - Host-specific capability names and filesystem paths may appear in bridge data;
   decisions over those declarations live only in the shared package.
@@ -210,7 +209,7 @@ have not been certified merely by the offline unit suite.
 The collected RAC source describes itself as a research alpha. Its reference
 `baselines/algorithms/rac.py` intentionally omits retry/reroute policy, spawn
 templates, disclosure measurement, and in-turn deadlines, while this paper's
-N0–R5 study requires communication, routing, contracts, verification, and recovery.
+N0–R3 study requires communication, routing, contracts, and advisory verification.
 Consequently, its schemas and mechanism invariants are treated as the
 design source, but the complete longitudinal condition profile is implemented
 and tested here. This avoids importing an exploratory baseline and claiming it

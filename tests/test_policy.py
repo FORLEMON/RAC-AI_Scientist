@@ -108,7 +108,7 @@ class PolicyTests(unittest.TestCase):
         )
         cp = Checkpoint("ep", 0, "answer", "researcher", [], [issue], budget(), capabilities)
 
-        for condition in (Condition.R1, Condition.R2, Condition.R3, Condition.R4, Condition.R5):
+        for condition in (Condition.R1, Condition.R2, Condition.R3):
             with self.subTest(condition=condition.value):
                 decision = SharedPolicy(condition).decide(
                     cp,
@@ -136,7 +136,7 @@ class PolicyTests(unittest.TestCase):
             required_tags=("experiment",),
         )
         cp = Checkpoint("ep", 1, "answer", "experimenter", [], [issue], budget(), capabilities)
-        decision = SharedPolicy(Condition.R5).decide(cp)
+        decision = SharedPolicy(Condition.R3).decide(cp)
         self.assertEqual(decision.capability_id, "experimenter")
         self.assertIsNotNone(decision.contract)
 
@@ -152,9 +152,9 @@ class PolicyTests(unittest.TestCase):
         verification = verify_result(decision.contract, result)
         self.assertEqual(verification.verdict.value, "supported")
 
-    def test_every_host_native_stage_keeps_its_named_capability_for_r1_through_r5(self):
+    def test_every_host_native_stage_keeps_its_named_capability_for_r1_through_r3(self):
         host_configs = Path(__file__).resolve().parents[1] / "configs" / "hosts"
-        conditions = (Condition.R1, Condition.R2, Condition.R3, Condition.R4, Condition.R5)
+        conditions = (Condition.R1, Condition.R2, Condition.R3)
 
         for config_path in sorted(host_configs.glob("*.json")):
             capabilities = capability_cards(load_host_manifest(config_path))
@@ -187,15 +187,15 @@ class PolicyTests(unittest.TestCase):
                         )
                         self.assertEqual(decision.capability_id, card.capability_id)
 
-    def test_r5_recovers_changed_artifact_after_timeout(self):
+    def test_r3_timeout_verification_is_advisory(self):
         cp = checkpoint([Issue("I-1", "experiment", "missing baseline")])
-        policy = SharedPolicy(Condition.R5)
+        policy = SharedPolicy(Condition.R3)
         decision = policy.decide(cp)
         before = ArtifactRecord("r", "results", "result", "old", 20)
         after = ArtifactRecord("r", "results", "result", "new", 20)
         result = InvocationResult("run", "", [before], [after], timed_out=True)
         evaluated = policy.evaluate(cp, decision, result)
-        self.assertIs(evaluated.action, Action.RECOVER)
+        self.assertIs(evaluated.action, Action.REVERIFY)
         self.assertEqual(evaluated.verification.verdict.value, "refuted")
 
     def test_mixed_review_issues_are_scoped_to_the_selected_role(self):
@@ -204,7 +204,7 @@ class PolicyTests(unittest.TestCase):
         issues = [Issue(f"review:{kind}", kind, f"fix {kind}")
                   for kind in ("figure", "methodology", "writing", "execution")]
         cp = Checkpoint("ep", 4, "finish research", "writer", [], issues, budget(), capabilities)
-        policy = SharedPolicy(Condition.R5)
+        policy = SharedPolicy(Condition.R3)
         decision = policy.decide(cp)
         self.assertEqual(decision.capability_id, "writer")
         self.assertEqual(decision.contract.issue_ids, ("review:writing",))
@@ -217,22 +217,26 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(decision.capability_id, "coder")
         self.assertEqual(set(decision.contract.issue_ids), {"review:figure", "review:execution"})
 
-    def test_authority_violation_escalates_instead_of_retrying_or_recovering(self):
-        for condition in (Condition.R4, Condition.R5):
-            for output, timed_out in (("done", False), ("", True)):
-                with self.subTest(condition=condition, output=output):
-                    cp = checkpoint()
-                    policy = SharedPolicy(condition)
-                    decision = policy.decide(cp)
-                    result = InvocationResult("write", output, [], [
-                        ArtifactRecord("report", "report", "terminal_report", "new", 300),
-                        ArtifactRecord("code", "code/main.py", "code", "new", 20),
-                    ], timed_out=timed_out)
-                    self.assertIs(policy.evaluate(cp, decision, result).action, Action.ESCALATE)
+    def test_authority_violation_is_a_warning_when_required_evidence_exists(self):
+        for condition in (Condition.R3,):
+            with self.subTest(condition=condition):
+                cp = checkpoint()
+                policy = SharedPolicy(condition)
+                decision = policy.decide(cp)
+                result = InvocationResult("write", "done", [], [
+                    ArtifactRecord("report", "report/report.md", "terminal_report", "new", 300),
+                    ArtifactRecord("code", "code/main.py", "code", "new", 20),
+                ])
+                evaluated = policy.evaluate(cp, decision, result)
+                self.assertIs(evaluated.action, Action.REVERIFY)
+                self.assertEqual(evaluated.verification.verdict.value, "supported")
+                authority = next(item for item in evaluated.verification.checks if item.name == "declared_writes_only")
+                self.assertTrue(authority.passed)
+                self.assertIn("warning:", authority.detail)
 
     def test_error_cannot_be_overridden_by_satisfied_artifact_evidence(self):
         cp = checkpoint()
-        policy = SharedPolicy(Condition.R4)
+        policy = SharedPolicy(Condition.R3)
         decision = policy.decide(cp)
         report = ArtifactRecord("r", "report/report.md", "terminal_report", "new", 300)
         result = InvocationResult("write", "apparently done", [], [report], error="provider failed", proposed_done=True)
@@ -241,7 +245,7 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("invocation_error", [item.name for item in verification.checks])
 
     def test_provider_http_402_stops_instead_of_rerouting(self):
-        policy = SharedPolicy(Condition.R5)
+        policy = SharedPolicy(Condition.R3)
         cp = checkpoint([Issue("I-1", "experiment", "needs code")])
         decision = policy.decide(cp)
         result = InvocationResult(
@@ -254,7 +258,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_native_terminal_error_stops_without_retry_or_recovery(self):
         cp = checkpoint()
-        for condition in (Condition.R4, Condition.R5):
+        for condition in (Condition.R3,):
             policy = SharedPolicy(condition)
             decision = policy.decide(cp)
             result = InvocationResult("write", "", [], [
@@ -262,15 +266,31 @@ class PolicyTests(unittest.TestCase):
             ], error="native provider rejected the request", terminal_error=True)
             self.assertIs(policy.evaluate(cp, decision, result).action, Action.STOP)
 
-    def test_verifier_rejects_undeclared_canonical_write(self):
+    def test_verifier_warns_but_accepts_undeclared_write_with_required_evidence(self):
         contract = SharedPolicy(Condition.R3).decide(checkpoint()).contract
         self.assertIsNotNone(contract)
         report = ArtifactRecord("r", "report/report.md", "terminal_report", "new", 300)
         secret = ArtifactRecord("s", "data/input.csv", "state", "changed", 20)
         result = InvocationResult("write", "done", [], [report, secret])
         verification = verify_result(contract, result)
-        self.assertEqual(verification.verdict.value, "refuted")
-        self.assertFalse(verification.checks[0].passed)
+        self.assertEqual(verification.verdict.value, "supported")
+        self.assertTrue(verification.checks[0].passed)
+        self.assertIn("warning:", verification.checks[0].detail)
+
+    def test_r3_missing_expected_change_is_advisory_and_selects_afresh(self):
+        cp = checkpoint()
+        policy = SharedPolicy(Condition.R3)
+        decision = policy.decide(cp)
+        result = InvocationResult(
+            "write",
+            "claimed completion",
+            [],
+            [ArtifactRecord("scratch", "scratch/notes.txt", "state", "new", 20)],
+        )
+        evaluated = policy.evaluate(cp, decision, result)
+        self.assertIs(evaluated.action, Action.REVERIFY)
+        self.assertIsNone(evaluated.capability_id)
+        self.assertEqual(evaluated.verification.verdict.value, "refuted")
 
     def test_terminal_report_must_change_in_current_invocation(self):
         contract = SharedPolicy(Condition.R3).decide(checkpoint()).contract
@@ -279,9 +299,19 @@ class PolicyTests(unittest.TestCase):
         result = InvocationResult("write", "done", [before], [before])
         self.assertEqual(verify_result(contract, result).verdict.value, "refuted")
 
-    def test_r5_retries_refuted_capability_without_removed_issue_aware_reroute(self):
+    def test_r3_refuted_capability_returns_to_runtime_selection(self):
         cp = checkpoint([Issue("I-1", "experiment", "still missing", attempts=2)])
-        policy = SharedPolicy(Condition.R5)
+        policy = SharedPolicy(Condition.R3)
         first = policy.decide(cp)
         result = InvocationResult(first.capability_id or "", "", [], [])
-        self.assertIs(policy.evaluate(cp, first, result).action, Action.RETRY)
+        self.assertIs(policy.evaluate(cp, first, result).action, Action.REVERIFY)
+
+    def test_r3_supported_proposed_completion_is_still_advisory(self):
+        cp = checkpoint()
+        policy = SharedPolicy(Condition.R3)
+        decision = policy.decide(cp)
+        report = ArtifactRecord("r", "report/report.md", "terminal_report", "new", 300)
+        result = InvocationResult("write", "done", [], [report], proposed_done=True)
+        evaluated = policy.evaluate(cp, decision, result)
+        self.assertIs(evaluated.action, Action.REVERIFY)
+        self.assertEqual(evaluated.verification.verdict.value, "supported")

@@ -338,11 +338,10 @@ class ArkBridge(HostBridge):
         )
 
     def accept_invocation(self, result: InvocationResult, evaluation: CoordinationDecision) -> None:
-        if self._pending_transition is None:
-            return
-        self.native_capability, self.open_issues = self._pending_transition
-        self._pending_transition = None
-        self._publish_disposition(True, evaluation.reason, self.native_capability)
+        if self._pending_transition is not None:
+            self.native_capability, self.open_issues = self._pending_transition
+            self._pending_transition = None
+        self._publish_evaluation(evaluation, self.native_capability)
 
     def reject_invocation(self, result: InvocationResult, evaluation: CoordinationDecision) -> None:
         self._pending_transition = None

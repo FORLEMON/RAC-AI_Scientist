@@ -8,19 +8,14 @@ from typing import Any
 HOST_SPECS = {
     "ark": ("ARK", "rac_ai_scientist.hosts.ark", "ArkBridge"),
     "agent_laboratory": ("AgentLaboratory-main", "rac_ai_scientist.hosts.agent_laboratory", "AgentLaboratoryBridge"),
-    "data_to_paper": ("data-to-paper-main", "rac_ai_scientist.hosts.data_to_paper", "DataToPaperBridge"),
-    "ai_researcher": ("AI-Researcher-main", "rac_ai_scientist.hosts.ai_researcher", "AIResearcherBridge"),
     "evo_scientist": ("EvoScientist-main", "rac_ai_scientist.hosts.evo_scientist", "EvoScientistBridge"),
-    "auto_research_claw": ("AutoResearchClaw-main", "rac_ai_scientist.hosts.auto_research_claw", "AutoResearchClawBridge"),
 }
 
 HOST_IDS = tuple(HOST_SPECS)
 SHAREDNET_HOST_IDS = (
     "ark",
     "agent_laboratory",
-    "ai_researcher",
     "evo_scientist",
-    "auto_research_claw",
 )
 
 

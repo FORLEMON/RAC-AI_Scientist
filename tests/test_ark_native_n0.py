@@ -105,22 +105,20 @@ class ArkNativeN0Tests(unittest.TestCase):
         bridge = object.__new__(ArkBridge)
         self.assertEqual(bridge._successor("coder"), "writer")
 
-    def test_all_n0_conditions_select_host_native_execution(self):
-        for host in (
-            "ark", "agent_laboratory", "data_to_paper", "ai_researcher",
-            "evo_scientist", "auto_research_claw",
-        ):
+    def test_all_active_n0_conditions_select_host_native_execution(self):
+        for host in ("ark", "agent_laboratory", "evo_scientist"):
             self.assertTrue(_uses_host_native_n0(host, "N0"))
             self.assertFalse(_uses_host_native_n0(host, "R1"))
 
-    def test_all_active_hosts_use_sharednet_only_for_r1_through_r5(self):
-        active = ("ark", "agent_laboratory", "ai_researcher", "evo_scientist", "auto_research_claw")
+    def test_all_active_hosts_use_sharednet_only_for_r1_through_r3(self):
+        active = ("ark", "agent_laboratory", "evo_scientist")
         for host in active:
             self.assertFalse(_uses_sharednet(host, "N0"))
-            for condition in ("R1", "R2", "R3", "R4", "R5"):
+            for condition in ("R1", "R2", "R3"):
                 self.assertTrue(_uses_sharednet(host, condition))
-        for condition in ("N0", "R1", "R2", "R3", "R4", "R5"):
-            self.assertFalse(_uses_sharednet("data_to_paper", condition))
+        for retired in ("data_to_paper", "ai_researcher", "auto_research_claw"):
+            for condition in ("N0", "R1", "R2", "R3"):
+                self.assertFalse(_uses_sharednet(retired, condition))
 
     def test_every_host_implements_its_own_native_entrypoint(self):
         for bridge_type in (

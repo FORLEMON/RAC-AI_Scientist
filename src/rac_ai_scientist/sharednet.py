@@ -363,3 +363,23 @@ class SharedNetSession:
                 },
             )
         )
+
+    def verification(self, hop: int, *, verdict: str, reason: str, next_role: str | None) -> None:
+        """Publish a non-blocking verifier result for the next selected agent."""
+        if self.coordinator is None:
+            return
+        self.previous_disposition = f"verification advisory ({verdict}): {reason}"
+        self.coordinator.send(
+            _encode(
+                f"Hop {hop} verification advisory ({verdict}): {reason}",
+                "work.verification",
+                {
+                    "episode_id": self.episode_id,
+                    "hop": hop,
+                    "next": next_role,
+                    "verdict": verdict,
+                    "advisory": True,
+                    "reason": reason,
+                },
+            )
+        )
