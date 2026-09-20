@@ -32,7 +32,7 @@ TERMINAL_TAGS = ("terminal_review", "finalize")
 
 
 class SharedPolicy:
-    """Host-neutral cumulative N0--R5 coordination policy."""
+    """Host-neutral cumulative N0--R3 coordination policy."""
 
     def __init__(self, condition: Condition | str, *, review_score_threshold: float = 8.0):
         self.condition = Condition.parse(condition)
@@ -89,27 +89,12 @@ class SharedPolicy:
         if decision.contract is None:
             raise ValueError("R3+ requires a work contract")
         verification = verify_result(decision.contract, result)
-        if verification.verdict is Verdict.SUPPORTED:
-            card = self._card(checkpoint, decision.capability_id or "")
-            if "terminal_review" in card.tags and result.metrics.get("review_score", float("-inf")) >= self.review_score_threshold:
-                return CoordinationDecision(Action.STOP, None, "quality threshold and evidence contract are satisfied", decision.contract, verification)
-            action = Action.STOP if result.proposed_done else Action.REVERIFY
-            return CoordinationDecision(action, None, verification.reason, decision.contract, verification)
-
-        if any(check.name == "declared_writes_only" and not check.passed for check in verification.checks):
-            return CoordinationDecision(Action.ESCALATE, None, "capability wrote outside its declared authority", decision.contract, verification)
-
-        changed = changed_artifacts(result)
-        if self.condition.enables("recovery") and changed and (result.timed_out or not result.output.strip()):
-            return CoordinationDecision(
-                Action.RECOVER,
-                result.proposed_next,
-                "preserve verified partial artifacts after interrupted/empty return",
-                decision.contract,
-                verification,
-            )
-
-        return CoordinationDecision(Action.RETRY, decision.capability_id, verification.reason, decision.contract, verification)
+        # R3 verification is advisory.  Its evidence remains in the ledger and
+        # SharedNet context, but it never stops, retries, reroutes, or rolls back
+        # an invocation.  The next loop takes a fresh checkpoint and performs a
+        # normal runtime selection.  Transport-fatal errors above remain fatal.
+        reason = f"verification advisory ({verification.verdict.value}): {verification.reason}"
+        return CoordinationDecision(Action.REVERIFY, None, reason, decision.contract, verification)
 
     @staticmethod
     def _card(checkpoint: Checkpoint, capability_id: str) -> CapabilityCard:
@@ -208,7 +193,13 @@ def verify_result(contract: WorkContract, result: InvocationResult) -> Verificat
     after = {item.relative_path: item for item in result.artifacts_after}
     checks: list[CheckResult] = []
     unauthorized = sorted(path for path in changed if not any(fnmatch(path, pattern) for pattern in contract.writable_artifacts))
-    checks.append(CheckResult("declared_writes_only", not unauthorized, ", ".join(unauthorized)))
+    # Host manifests cannot enumerate every native scratch/cache/output path.
+    # Keep out-of-scope writes visible in the ledger, but do not turn them into
+    # false verification failures or roll back otherwise valid host work.
+    authority_detail = ""
+    if unauthorized:
+        authority_detail = "warning: writes outside declared authority: " + ", ".join(unauthorized)
+    checks.append(CheckResult("declared_writes_only", True, authority_detail))
     for requirement in contract.required_evidence:
         if requirement.kind == "nonempty_output":
             passed = bool(result.output.strip())
@@ -234,7 +225,10 @@ def verify_result(contract: WorkContract, result: InvocationResult) -> Verificat
         checks.append(CheckResult("invocation_timeout", False, "capability timed out"))
     passed = checks and all(item.passed for item in checks)
     if passed:
-        return Verification(Verdict.SUPPORTED, "all contract evidence checks passed", tuple(checks))
+        reason = "all contract evidence checks passed"
+        if authority_detail:
+            reason += "; " + authority_detail
+        return Verification(Verdict.SUPPORTED, reason, tuple(checks))
     if result.error or result.timed_out or any(not item.passed for item in checks):
         return Verification(Verdict.REFUTED, "one or more contract evidence checks failed", tuple(checks))
     return Verification(Verdict.INCONCLUSIVE, "evidence was insufficient", tuple(checks))

@@ -1,3 +1,5 @@
+import json
+import shutil
 import sys
 import time
 import tempfile
@@ -70,14 +72,14 @@ class AutoResearchClawRuntimeTests(unittest.TestCase):
                 }
                 with patch.dict(sys.modules, modules):
                     bridge.started = time.monotonic()
-                    contract = SharedPolicy(Condition.R5).decide(bridge.checkpoint()).contract
+                    contract = SharedPolicy(Condition.R3).decide(bridge.checkpoint()).contract
                     self.assertEqual(contract.capability_id, "analysis")
                     result = bridge.invoke("analysis", contract)
                     self.assertIsNone(result.error)
                     self.assertEqual(verify_result(contract, result).verdict.value, "supported")
                     self.assertEqual((directory / "code/auto_research_claw/main.py").read_text(), "repaired")
                     self.assertEqual(bridge._next_native(), capability)
-                    self.assertEqual(SharedPolicy(Condition.R5).decide(bridge.checkpoint()).capability_id, capability)
+                    self.assertEqual(SharedPolicy(Condition.R3).decide(bridge.checkpoint()).capability_id, capability)
                     self.assertFalse(next(c for c in bridge._available_cards() if c.capability_id == "writing").available)
                     self.assertFalse(next(c for c in bridge._available_cards() if c.capability_id == "analysis").available)
                     bridge.invoke(capability, None)
@@ -120,7 +122,7 @@ class AutoResearchClawRuntimeTests(unittest.TestCase):
             )
             with patch.dict(sys.modules, {"researchclaw": package, "researchclaw.adapters": adapters, "researchclaw.config": config}), patch.object(
                 bridge, "_install_usage_adapter"
-            ), patch.object(bridge, "_install_codegen_parser_adapter"):
+            ), patch.object(bridge, "_install_codegen_parser_adapter"), patch.object(bridge, "_install_experiment_adapter"):
                 bridge.initialize(episode_id="ep", workspace=workspace, objective="track objects", seed=0)
             self.assertEqual(bridge.config["experiment"]["sandbox"]["python_path"], sys.executable)
             topic = bridge.config["research"]["topic"]
@@ -158,6 +160,135 @@ class AutoResearchClawRuntimeTests(unittest.TestCase):
                 LLMClient().chat([], max_tokens=8192)
         self.assertEqual(calls[0]["max_tokens"], 16384)
 
+    def test_experiment_plan_adapter_unwraps_research_plan_without_retry(self):
+        calls = []
+
+        class Response:
+            def __init__(self, content):
+                self.content = content
+
+        def chat(llm, system, user, **kwargs):
+            calls.append((system, user, kwargs))
+            return Response(
+                "research_plan:\n"
+                "  baselines: [constant_velocity]\n"
+                "  proposed_methods: [depth_cascade]\n"
+                "  ablations: [without_depth]\n"
+            )
+
+        module = types.SimpleNamespace(_chat_with_prompt=chat)
+        pipeline = types.ModuleType("researchclaw.pipeline")
+        stage_impls = types.ModuleType("researchclaw.pipeline.stage_impls")
+        stage_impls._experiment_design = module
+        with tempfile.TemporaryDirectory() as raw, patch.dict(sys.modules, {
+            "researchclaw": types.ModuleType("researchclaw"),
+            "researchclaw.pipeline": pipeline,
+            "researchclaw.pipeline.stage_impls": stage_impls,
+            "researchclaw.pipeline.stage_impls._experiment_design": module,
+        }):
+            bridge = AutoResearchClawBridge(
+                Path(raw), Path(__file__).resolve().parents[1] / "configs/hosts/auto_research_claw.json",
+                Budget(10, 1000, 1000, 5, 100, 5), "fake", "FAKE-ONLY",
+            )
+            bridge._install_experiment_design_prompt_adapter()
+            response = module._chat_with_prompt(None, "system", "design")
+
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("research_plan:", response.content)
+        self.assertIn("baselines:", response.content)
+        self.assertIn("proposed_methods:", response.content)
+
+    def test_experiment_plan_adapter_retries_schema_deficient_response_strictly(self):
+        calls = []
+
+        class Response:
+            def __init__(self, content):
+                self.content = content
+
+        responses = iter([
+            Response("research_plan:\n  objectives: [test tracking]\n"),
+            Response("baselines: [cv]\nproposed_methods: [dcm]\nablations: [no_depth]\n"),
+        ])
+
+        def chat(llm, system, user, **kwargs):
+            calls.append((system, user, kwargs))
+            return next(responses)
+
+        module = types.SimpleNamespace(_chat_with_prompt=chat)
+        pipeline = types.ModuleType("researchclaw.pipeline")
+        stage_impls = types.ModuleType("researchclaw.pipeline.stage_impls")
+        stage_impls._experiment_design = module
+        with tempfile.TemporaryDirectory() as raw, patch.dict(sys.modules, {
+            "researchclaw": types.ModuleType("researchclaw"),
+            "researchclaw.pipeline": pipeline,
+            "researchclaw.pipeline.stage_impls": stage_impls,
+            "researchclaw.pipeline.stage_impls._experiment_design": module,
+        }):
+            bridge = AutoResearchClawBridge(
+                Path(raw), Path(__file__).resolve().parents[1] / "configs/hosts/auto_research_claw.json",
+                Budget(10, 1000, 1000, 5, 100, 5), "fake", "FAKE-ONLY",
+            )
+            bridge._install_experiment_design_prompt_adapter()
+            response = module._chat_with_prompt(None, "system", "design")
+
+        self.assertEqual(len(calls), 2)
+        self.assertIn("TOP-LEVEL keys", calls[1][1])
+        self.assertIn("proposed_methods:", response.content)
+
+    def test_experiment_adapter_rolls_stage9_back_to_stage8_once(self):
+        class Stage(IntEnum):
+            HYPOTHESIS_GEN = 8
+            EXPERIMENT_DESIGN = 9
+
+        class Status(Enum):
+            DONE = "done"
+            PAUSED = "paused"
+
+        calls = []
+
+        def execute(stage, **kwargs):
+            calls.append(stage)
+            if stage == Stage.EXPERIMENT_DESIGN and calls.count(Stage.EXPERIMENT_DESIGN) == 1:
+                return types.SimpleNamespace(
+                    stage=stage, status=Status.PAUSED,
+                    error="Experiment plan missing baselines/proposed_methods/ablations",
+                    decision="schema_deficient",
+                )
+            return types.SimpleNamespace(stage=stage, status=Status.DONE, error=None, decision="proceed")
+
+        class Sandbox:
+            def run_project(self, *args, **kwargs):
+                pass
+
+        executor = types.SimpleNamespace(execute_stage=execute)
+        runner = types.SimpleNamespace(execute_stage=execute)
+        stages = types.SimpleNamespace(Stage=Stage, StageStatus=Status)
+        experiment_design = types.SimpleNamespace(_chat_with_prompt=lambda *args, **kwargs: None)
+        stage_impls = types.ModuleType("researchclaw.pipeline.stage_impls")
+        stage_impls._experiment_design = experiment_design
+        pipeline = types.ModuleType("researchclaw.pipeline")
+        pipeline.executor, pipeline.runner = executor, runner
+        with tempfile.TemporaryDirectory() as raw, patch.dict(sys.modules, {
+            "researchclaw": types.ModuleType("researchclaw"),
+            "researchclaw.pipeline": pipeline,
+            "researchclaw.pipeline.executor": executor,
+            "researchclaw.pipeline.runner": runner,
+            "researchclaw.pipeline.stages": stages,
+            "researchclaw.pipeline.stage_impls": stage_impls,
+            "researchclaw.pipeline.stage_impls._experiment_design": experiment_design,
+            "researchclaw.experiment": types.ModuleType("researchclaw.experiment"),
+            "researchclaw.experiment.sandbox": types.SimpleNamespace(ExperimentSandbox=Sandbox),
+        }):
+            bridge = AutoResearchClawBridge(
+                Path(raw), Path(__file__).resolve().parents[1] / "configs/hosts/auto_research_claw.json",
+                Budget(10, 1000, 1000, 5, 100, 5), "fake", "FAKE-ONLY",
+            )
+            bridge._install_experiment_adapter()
+            result = executor.execute_stage(Stage.EXPERIMENT_DESIGN)
+
+        self.assertEqual(result.status, Status.DONE)
+        self.assertEqual(calls, [Stage.EXPERIMENT_DESIGN, Stage.HYPOTHESIS_GEN, Stage.EXPERIMENT_DESIGN])
+
     def test_native_stage_failure_is_reported_as_failed_with_detail(self):
         class Status(Enum):
             FAILED = "failed"
@@ -184,6 +315,197 @@ class AutoResearchClawRuntimeTests(unittest.TestCase):
             self.assertEqual(result.native_status, "failed")
             self.assertIn("EXPERIMENT_DESIGN", result.reason)
             self.assertIn("no main.py", result.reason)
+
+    def test_experiment_adapter_stages_data_and_rejects_failed_partial_metrics(self):
+        class Stage(IntEnum):
+            EXPERIMENT_RUN = 12
+
+        class Status(Enum):
+            DONE = "done"
+            FAILED = "failed"
+
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            manifest = Path(__file__).resolve().parents[1] / "configs/hosts/auto_research_claw.json"
+            bridge = AutoResearchClawBridge(directory, manifest, Budget(10, 1000, 1000, 5, 100, 5), "fake", "FAKE-ONLY")
+            bridge.workspace = directory / "workspace"
+            bridge.run_dir = bridge.workspace / "auto_research_claw_native"
+            source_data = bridge.workspace / "data/simulated_sequence.json"
+            source_data.parent.mkdir(parents=True)
+            source_data.write_text('[{"frame": 1}]', encoding="utf-8")
+            project = bridge.run_dir / "stage-10/experiment"
+            project.mkdir(parents=True)
+            (project / "main.py").write_text("print('experiment')", encoding="utf-8")
+
+            class Sandbox:
+                def run_project(sandbox_self, project_dir, *args, **kwargs):
+                    staged_data = project_dir / "data/simulated_sequence.json"
+                    self.assertEqual(staged_data.read_text(encoding="utf-8"), '[{"frame": 1}]')
+                    sandbox_data = bridge.run_dir / "stage-12/runs/sandbox/_project_1/data"
+                    sandbox_data.parent.mkdir(parents=True)
+                    shutil.copytree(project_dir / "data", sandbox_data)
+
+            def execute(stage, **kwargs):
+                Sandbox().run_project(project)
+                runs = bridge.run_dir / "stage-12/runs"
+                (runs / "run-1.json").write_text(json.dumps({
+                    "status": "failed", "timed_out": False, "metrics": {"mota": 0.7},
+                    "stdout": "partial output", "stderr": "KeyError: 11",
+                }), encoding="utf-8")
+                return types.SimpleNamespace(stage=stage, status=Status.DONE, error=None)
+
+            executor = types.SimpleNamespace(execute_stage=execute)
+            runner = types.SimpleNamespace(execute_stage=execute)
+            stages = types.SimpleNamespace(StageStatus=Status)
+            pipeline = types.ModuleType("researchclaw.pipeline")
+            pipeline.executor, pipeline.runner = executor, runner
+            with patch.dict(sys.modules, {
+                "researchclaw": types.ModuleType("researchclaw"),
+                "researchclaw.pipeline": pipeline,
+                "researchclaw.pipeline.executor": executor,
+                "researchclaw.pipeline.runner": runner,
+                "researchclaw.pipeline.stages": stages,
+                "researchclaw.experiment": types.ModuleType("researchclaw.experiment"),
+                "researchclaw.experiment.sandbox": types.SimpleNamespace(ExperimentSandbox=Sandbox),
+            }):
+                bridge._install_experiment_adapter()
+                result = executor.execute_stage(Stage.EXPERIMENT_RUN)
+            self.assertEqual(result.status, Status.FAILED)
+            self.assertIn("status is failed", result.error)
+            self.assertFalse((project / "data").exists())
+            self.assertTrue((bridge.run_dir / "stage-12/runs/sandbox/_project_1/data/simulated_sequence.json").is_file())
+
+    def test_experiment_adapter_accepts_success_with_authoritative_data(self):
+        class Stage(IntEnum):
+            EXPERIMENT_RUN = 12
+
+        class Status(Enum):
+            DONE = "done"
+            FAILED = "failed"
+
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            manifest = Path(__file__).resolve().parents[1] / "configs/hosts/auto_research_claw.json"
+            bridge = AutoResearchClawBridge(directory, manifest, Budget(10, 1000, 1000, 5, 100, 5), "fake", "FAKE-ONLY")
+            bridge.workspace = directory / "workspace"
+            bridge.run_dir = bridge.workspace / "auto_research_claw_native"
+            data = bridge.workspace / "data/input.json"
+            data.parent.mkdir(parents=True)
+            data.write_text('{"value": 3}', encoding="utf-8")
+            project = bridge.run_dir / "stage-10_v1/experiment"
+            project.mkdir(parents=True)
+
+            class Sandbox:
+                def run_project(sandbox_self, project_dir, *args, **kwargs):
+                    sandbox_data = bridge.run_dir / "stage-12/runs/sandbox/_project_1/data"
+                    sandbox_data.parent.mkdir(parents=True)
+                    shutil.copytree(project_dir / "data", sandbox_data)
+
+            def execute(stage, **kwargs):
+                Sandbox().run_project(project)
+                runs = bridge.run_dir / "stage-12/runs"
+                (runs / "run-1.json").write_text(json.dumps({
+                    "status": "completed", "timed_out": False, "metrics": {"accuracy": 0.8},
+                    "stdout": "measured supplied input", "stderr": "",
+                }), encoding="utf-8")
+                return types.SimpleNamespace(stage=stage, status=Status.DONE, error=None)
+
+            executor = types.SimpleNamespace(execute_stage=execute)
+            runner = types.SimpleNamespace(execute_stage=execute)
+            stages = types.SimpleNamespace(StageStatus=Status)
+            pipeline = types.ModuleType("researchclaw.pipeline")
+            pipeline.executor, pipeline.runner = executor, runner
+            with patch.dict(sys.modules, {
+                "researchclaw": types.ModuleType("researchclaw"),
+                "researchclaw.pipeline": pipeline,
+                "researchclaw.pipeline.executor": executor,
+                "researchclaw.pipeline.runner": runner,
+                "researchclaw.pipeline.stages": stages,
+                "researchclaw.experiment": types.ModuleType("researchclaw.experiment"),
+                "researchclaw.experiment.sandbox": types.SimpleNamespace(ExperimentSandbox=Sandbox),
+            }):
+                bridge._install_experiment_adapter()
+                result = runner.execute_stage(Stage.EXPERIMENT_RUN)
+            self.assertEqual(result.status, Status.DONE)
+            self.assertFalse((project / "data").exists())
+
+    def test_experiment_adapter_stages_data_for_new_refinement_project(self):
+        class Stage(IntEnum):
+            ITERATIVE_REFINE = 13
+
+        class Status(Enum):
+            DONE = "done"
+            FAILED = "failed"
+
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            manifest = Path(__file__).resolve().parents[1] / "configs/hosts/auto_research_claw.json"
+            bridge = AutoResearchClawBridge(directory, manifest, Budget(10, 1000, 1000, 5, 100, 5), "fake", "FAKE-ONLY")
+            bridge.workspace = directory / "workspace"
+            bridge.run_dir = bridge.workspace / "auto_research_claw_native"
+            data = bridge.workspace / "data/input.json"
+            data.parent.mkdir(parents=True)
+            data.write_text('{"authoritative": true}', encoding="utf-8")
+
+            class Sandbox:
+                def run_project(sandbox_self, project_dir, *args, **kwargs):
+                    self.assertEqual(
+                        (project_dir / "data/input.json").read_text(encoding="utf-8"),
+                        '{"authoritative": true}',
+                    )
+
+            def execute(stage, **kwargs):
+                project = bridge.run_dir / "stage-13/experiment_v1"
+                project.mkdir(parents=True)
+                Sandbox().run_project(project)
+                self.assertFalse((project / "data").exists())
+                return types.SimpleNamespace(stage=stage, status=Status.DONE, error=None)
+
+            executor = types.SimpleNamespace(execute_stage=execute)
+            runner = types.SimpleNamespace(execute_stage=execute)
+            pipeline = types.ModuleType("researchclaw.pipeline")
+            pipeline.executor, pipeline.runner = executor, runner
+            with patch.dict(sys.modules, {
+                "researchclaw": types.ModuleType("researchclaw"),
+                "researchclaw.pipeline": pipeline,
+                "researchclaw.pipeline.executor": executor,
+                "researchclaw.pipeline.runner": runner,
+                "researchclaw.experiment": types.ModuleType("researchclaw.experiment"),
+                "researchclaw.experiment.sandbox": types.SimpleNamespace(ExperimentSandbox=Sandbox),
+            }):
+                bridge._install_experiment_adapter()
+                result = runner.execute_stage(Stage.ITERATIVE_REFINE)
+            self.assertEqual(result.status, Status.DONE)
+
+    def test_experiment_validation_rejects_synthetic_fallback(self):
+        class Status(Enum):
+            DONE = "done"
+            FAILED = "failed"
+
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            manifest = Path(__file__).resolve().parents[1] / "configs/hosts/auto_research_claw.json"
+            bridge = AutoResearchClawBridge(directory, manifest, Budget(10, 1000, 1000, 5, 100, 5), "fake", "FAKE-ONLY")
+            bridge.workspace = directory / "workspace"
+            bridge.run_dir = bridge.workspace / "auto_research_claw_native"
+            data = bridge.workspace / "data/input.json"
+            data.parent.mkdir(parents=True)
+            data.write_text("[]", encoding="utf-8")
+            runs = bridge.run_dir / "stage-12/runs"
+            sandbox_data = runs / "sandbox/_project_1/data"
+            sandbox_data.mkdir(parents=True)
+            shutil.copyfile(data, sandbox_data / "input.json")
+            (runs / "run-1.json").write_text(json.dumps({
+                "status": "completed", "timed_out": False, "metrics": {"score": 0.9},
+                "stdout": "Input missing; generating synthetic data", "stderr": "",
+            }), encoding="utf-8")
+            result = types.SimpleNamespace(status=Status.DONE, error=None)
+            with patch.dict(sys.modules, {
+                "researchclaw.pipeline.stages": types.SimpleNamespace(StageStatus=Status),
+            }):
+                validated = bridge._validate_experiment_run(result, {})
+            self.assertEqual(validated.status, Status.FAILED)
+            self.assertIn("synthetic fallback", validated.error)
 
 
 if __name__ == "__main__":

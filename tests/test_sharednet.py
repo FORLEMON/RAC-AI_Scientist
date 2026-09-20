@@ -139,6 +139,33 @@ class SharedNetTests(unittest.TestCase):
 
         self.assertIn("also test the low-noise subset", next_prompt)
 
+    def test_verification_is_advisory_context_for_next_agent(self):
+        invite = SharedNetInvite.parse(
+            f"ROOM=rom_advisory TOKEN=rit_{'a' * 43}",
+            room_id="rom_advisory",
+        )
+        session = SharedNetSession(
+            invite,
+            "episode-advisory",
+            ("plan", "write"),
+            client_factory=FakeRoomClient,
+        )
+        session.join()
+        session.request("plan", 0, "make a plan", "contract-0")
+        session.result("plan", 0, "plan attempted", "write")
+        session.verification(
+            0,
+            verdict="refuted",
+            reason="expected artifact did not change",
+            next_role="write",
+        )
+
+        prompt = session.request("write", 1, "write report", "contract-1")
+        self.assertIn("verification advisory (refuted)", prompt)
+        self.assertIn("expected artifact did not change", prompt)
+        typed = [_decode(message.content)[1] for message in FakeRoomClient.messages_log]
+        self.assertIn("work.verification", [item["type"] for item in typed if item])
+
     def test_common_bridge_lifecycle_joins_roles_and_publishes_result(self):
         class ProbeBridge(HostBridge):
             host_id = "probe"

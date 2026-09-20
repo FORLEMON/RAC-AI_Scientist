@@ -30,7 +30,7 @@ def _uses_sharednet(host: str, condition: Condition | str) -> bool:
 
 
 def _execute_episode(bridge, condition: str, ledger: JsonlLedger, *, hard_hop_limit: int, review_score_threshold: float):
-    """Execute every N0 with its host scheduler; reserve RAC for R1--R5."""
+    """Execute every N0 with its host scheduler; reserve RAC for R1--R3."""
     if _uses_host_native_n0(bridge.host_id, condition):
         ledger.append({"type": "native_run_start", "host": bridge.host_id, "condition": condition})
         native_result = bridge.run_native()
@@ -240,13 +240,13 @@ def _run_one(args: argparse.Namespace) -> int:
     ).strip() if uses_sharednet else ""
     if uses_sharednet:
         if not sharednet_room_id:
-            raise ValueError(f"{args.host} R1-R5 requires SHAREDNET_ROOM_ID in the run-space .env, process environment, or --sharednet-room-id")
+            raise ValueError(f"{args.host} R1-R3 requires SHAREDNET_ROOM_ID in the run-space .env, process environment, or --sharednet-room-id")
         invite_text = (
             sharednet_settings.get("SHAREDNET_INVITE")
             or os.environ.get("SHAREDNET_INVITE", "")
         ).strip()
         if not invite_text:
-            raise ValueError(f"{args.host} R1-R5 requires SHAREDNET_INVITE in the run-space .env or process environment")
+            raise ValueError(f"{args.host} R1-R3 requires SHAREDNET_INVITE in the run-space .env or process environment")
         sharednet_base_url = (
             sharednet_settings.get("SHAREDNET_BASE_URL")
             or os.environ.get("SHAREDNET_BASE_URL", "https://www.sharednet.ai")
@@ -431,7 +431,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--project-root", default=str(Path(__file__).resolve().parents[2]))
     run.add_argument("--host", required=True, choices=HOST_IDS)
     run.add_argument("--upstream", help="explicit host checkout (or set RAC_HOST_ROOT)")
-    run.add_argument("--condition", required=True, choices=("N0", "R1", "R2", "R3", "R4", "R5"))
+    run.add_argument("--condition", required=True, choices=("N0", "R1", "R2", "R3"))
     run.add_argument("--sharednet-room-id", help="unique SharedNet Room for this episode (or set SHAREDNET_ROOM_ID)")
     run.add_argument("--sharednet-env-file", help="dotenv file for this run (defaults to <task-dir>/.env)")
     run.add_argument("--task-dir", required=True)
