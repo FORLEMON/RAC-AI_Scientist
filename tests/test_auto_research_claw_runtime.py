@@ -120,12 +120,13 @@ class AutoResearchClawRuntimeTests(unittest.TestCase):
             )
             with patch.dict(sys.modules, {"researchclaw": package, "researchclaw.adapters": adapters, "researchclaw.config": config}), patch.object(
                 bridge, "_install_usage_adapter"
-            ), patch.object(bridge, "_install_codegen_parser_adapter"):
+            ), patch.object(bridge, "_install_codegen_parser_adapter"), patch.object(bridge, "_install_opencode_context"):
                 bridge.initialize(episode_id="ep", workspace=workspace, objective="track objects", seed=0)
             self.assertEqual(bridge.config["experiment"]["sandbox"]["python_path"], sys.executable)
             topic = bridge.config["research"]["topic"]
-            self.assertIn("data/sequence.json", topic)
-            self.assertIn("do not acquire or substitute an external dataset", topic)
+            self.assertEqual(topic, "track objects")
+            self.assertIn("data/sequence.json", bridge._model_instructions)
+            self.assertIn("do not acquire or substitute an external dataset", bridge._model_instructions)
 
     def test_codegen_parser_accepts_complete_raw_python(self):
         source = "from pathlib import Path\n\nPath('result.txt').write_text('ok')\n"

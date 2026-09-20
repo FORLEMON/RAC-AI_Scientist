@@ -72,6 +72,7 @@ class RuntimeBlockersTests(unittest.TestCase):
                     bridge.config = bridge.adapters = object()
                     bridge.episode_id = 'episode'
                     bridge.completed = set()
+                    bridge._model_instructions = ""
                     bridge.rollback_stage = None
                     bridge.decision_attempts = 0
                     bridge.usage = Usage()

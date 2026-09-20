@@ -91,6 +91,7 @@ class AutoResearchClawBridge(HostBridge):
         self.terminal = False
         self.usage = Usage()
         self.open_issues: list[Issue] = []
+        self._model_instructions = ""
         self.rollback_stage: int | None = None
         self.decision_attempts = 0
 
@@ -111,10 +112,10 @@ class AutoResearchClawBridge(HostBridge):
         from researchclaw.config import RCConfig
 
         base_url = os.environ.get("AGENT_API_BASE", "https://api.openai.com/v1")
-        execution_topic = _benchmark_execution_topic(self.workspace, objective)
+        self._model_instructions = _benchmark_execution_topic(self.workspace, objective)
         data = {
             "project": {"name": episode_id, "mode": "full-auto"},
-            "research": {"topic": execution_topic, "quality_threshold": 0},
+            "research": {"topic": objective, "quality_threshold": 0},
             "runtime": {"timezone": "UTC", "max_parallel_tasks": 1, "retry_limit": 0},
             "notifications": {"channel": "none", "on_stage_start": False, "on_stage_fail": False, "on_gate_required": False},
             "knowledge_base": {"backend": "markdown", "root": str(self.run_dir / "kb")},
@@ -134,6 +135,7 @@ class AutoResearchClawBridge(HostBridge):
         self.adapters = AdapterBundle.from_config(self.config)
         self._install_codegen_parser_adapter()
         self._install_usage_adapter()
+        self._install_opencode_context()
 
     def initialize_native(self, *, episode_id: str, workspace: Path, objective: str, seed: int) -> None:
         self.initialize(episode_id=episode_id, workspace=workspace, objective=objective, seed=seed)
@@ -215,20 +217,14 @@ class AutoResearchClawBridge(HostBridge):
         started, output, error = time.monotonic(), "", None
         proposed_done = False
         metrics: dict[str, float] = {}
-        original_config = self.config
+        original_instructions = self._model_instructions
         try:
             from researchclaw.pipeline.executor import execute_stage
             from researchclaw.pipeline.stages import Stage, StageStatus
             if getattr(self, "sharednet", None) is not None:
                 coordination_prompt = render_contract_prompt(self.objective, capability_id, contract)
                 coordination_prompt = self.communication_prompt(capability_id, coordination_prompt, contract)
-                self.config = replace(
-                    self.config,
-                    research=replace(
-                        self.config.research,
-                        topic=f"{self.config.research.topic}\n\n{coordination_prompt}",
-                    ),
-                )
+                self._model_instructions = f"{original_instructions}\n\n{coordination_prompt}"
             first, last = STAGE_RANGES[capability_id]
             if self.rollback_stage is not None and first <= self.rollback_stage <= last:
                 first = self.rollback_stage
@@ -291,7 +287,7 @@ class AutoResearchClawBridge(HostBridge):
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
         finally:
-            self.config = original_config
+            self._model_instructions = original_instructions
         self.hop += 1
         after = snapshot_workspace(self.workspace)
         return InvocationResult(capability_id, output, before, after, Usage(
@@ -313,6 +309,9 @@ class AutoResearchClawBridge(HostBridge):
             if time.monotonic() - bridge.started >= bridge.initial_budget.wall_seconds:
                 raise TimeoutError("lifecycle wall-time budget exhausted")
             kwargs["model"] = bridge.model
+            kwargs["system"] = "\n\n".join(part for part in (
+                kwargs.get("system"), bridge._model_instructions,
+            ) if part)
             requested = int(kwargs.get("max_tokens") or bridge.initial_budget.output_tokens)
             # Upstream uses 8192 for code generation.  In practice that often
             # truncates a multi-file program, so give code/regen calls a safe
@@ -336,6 +335,25 @@ class AutoResearchClawBridge(HostBridge):
             return response
         chat._rac_wrapped = True
         LLMClient.chat = chat
+
+    def _install_opencode_context(self) -> None:
+        """Keep Beast Mode's instructions without making them a search topic."""
+        from researchclaw.pipeline.opencode_bridge import OpenCodeBridge
+
+        bridge, original = self, OpenCodeBridge.generate
+        if getattr(original, "_rac_context", False):
+            return
+
+        def generate(client, stage_dir, topic, exp_plan, metric, pkg_hint="", extra_guidance="", time_budget_sec=300):
+            extra_guidance = "\n\n".join(part for part in (
+                extra_guidance, bridge._model_instructions,
+            ) if part)
+            return original(client, stage_dir=stage_dir, topic=topic, exp_plan=exp_plan,
+                            metric=metric, pkg_hint=pkg_hint, extra_guidance=extra_guidance,
+                            time_budget_sec=time_budget_sec)
+
+        generate._rac_context = True
+        OpenCodeBridge.generate = generate
 
     def _install_codegen_parser_adapter(self) -> None:
         """Accept a complete raw Python response when upstream omitted fences."""
