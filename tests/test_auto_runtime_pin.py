@@ -12,7 +12,7 @@ from rac_ai_scientist.cli import _run_one
 
 
 # Previously recorded successful runtime and unchanged official source pins.
-RUNTIME = "80e549620b5107a221c82302c58fd3c21284bc19ec6065def2cdcd0a7c3b2716"
+RUNTIME = "c4def4550574dfc4eade06aed1dcdcd998ee86d603a18e5777f1cb85e58e4b64"
 OFFICIAL = "e02d651fa3579b0fb878130deef5be6dff10cd40977e5df0fc6099e9b9326d6b"
 
 

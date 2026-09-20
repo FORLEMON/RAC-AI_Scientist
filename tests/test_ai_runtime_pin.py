@@ -11,7 +11,7 @@ from unittest.mock import patch
 from rac_ai_scientist.cli import _run_one
 
 
-RUNTIME = "3b46c70382861063ed207bb8172df2a3ef8920be3cb69f81314626fce5284aef"
+RUNTIME = "d38fddf6197d888a951de7c09165dbda0ecdd9a92e569225ae292f6d95002d06"
 OFFICIAL = "a952224ea0e3216f9c6cff1c30444afef04a9d8bb0bbb206c60df2125c8ec0c6"
 SNAPSHOT = "48de1aef80d0fe39fe1148441e992d3b22a20f49678801d62ca005990129c528"
 
@@ -22,7 +22,7 @@ class AIRuntimePinTests(unittest.TestCase):
         spec = lock["upstreams"]["ai_researcher"]
         self.assertEqual(spec["tree_sha256"], OFFICIAL)
         self.assertEqual(spec["snapshot_tree_sha256"], SNAPSHOT)
-        self.assertEqual(spec["revision"], "f9a6f8480860c193afff600eeffe3defcee8a978")
+        self.assertEqual(spec["revision"], "e9c3294cee5dc85ce70cb1e30b7a2f86f69d0502")
         self.assertEqual(spec["url"], "https://github.com/HKUDS/AI-Researcher.git")
         cases = (("packaged", RUNTIME, True), ("packaged", OFFICIAL, False),
                  ("packaged", "wrong-runtime", False), ("official", OFFICIAL, True),

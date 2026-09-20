@@ -39,15 +39,15 @@
     },
     "ai_researcher": {
       "url": "https://github.com/HKUDS/AI-Researcher.git",
-      "revision": "f9a6f8480860c193afff600eeffe3defcee8a978",
+      "revision": "e9c3294cee5dc85ce70cb1e30b7a2f86f69d0502",
       "required_for_live": true,
       "version_observed": "0.2.0",
       "local_snapshot": "AI-Researcher-main",
       "tree_sha256": "a952224ea0e3216f9c6cff1c30444afef04a9d8bb0bbb206c60df2125c8ec0c6",
       "snapshot_tree_sha256": "48de1aef80d0fe39fe1148441e992d3b22a20f49678801d62ca005990129c528",
-      "runtime_tree_sha256": "3b46c70382861063ed207bb8172df2a3ef8920be3cb69f81314626fce5284aef",
+      "runtime_tree_sha256": "d38fddf6197d888a951de7c09165dbda0ecdd9a92e569225ae292f6d95002d06",
       "license": "MIT",
-      "note": "The Windows archive snapshot normalizes ':' to '_' and omits seven '?' filenames; all 1,457 present files match the revision. Fresh bootstraps retain the canonical 1,464-file Git tree. The approved packaged runtime uses native commit 6ba5d804e5879cc9e0f9d799c766e423974b3f8d (EOF, PDF text boundary, and terminal source identity); runtime_tree_sha256 covers its clean Git archive. The official revision/tree and Windows snapshot pins remain unchanged."
+      "note": "The Windows archive snapshot normalizes ':' to '_' and omits seven '?' filenames; all 1,457 present files match the official revision. Fresh bootstraps retain the canonical 1,464-file Git tree. The reviewed packaged runtime uses native commit e9c3294cee5dc85ce70cb1e30b7a2f86f69d0502; runtime_tree_sha256 covers its clean Git archive."
     },
     "evo_scientist": {
       "url": "https://github.com/EvoScientist/EvoScientist.git",
@@ -65,8 +65,8 @@
       "version_observed": "0.5.0",
       "local_snapshot": "AutoResearchClaw-main",
       "tree_sha256": "e02d651fa3579b0fb878130deef5be6dff10cd40977e5df0fc6099e9b9326d6b",
-      "runtime_tree_sha256": "80e549620b5107a221c82302c58fd3c21284bc19ec6065def2cdcd0a7c3b2716",
-      "note": "Runtime uses the approved 6470229 fork with bounded native arXiv connect/read waits; tree_sha256 retains the official be4ba4755bf1b52220f25e13b2293b5956590070 source tree.",
+      "runtime_tree_sha256": "c4def4550574dfc4eade06aed1dcdcd998ee86d603a18e5777f1cb85e58e4b64",
+      "note": "Runtime uses the approved 6470229 fork with bounded native arXiv connect/read waits; runtime_tree_sha256 is computed from a clean `git -c core.autocrlf=false archive 6470229`; tree_sha256 retains the official be4ba4755bf1b52220f25e13b2293b5956590070 source tree.",
       "license": "MIT"
     },
     "researchclawbench": {

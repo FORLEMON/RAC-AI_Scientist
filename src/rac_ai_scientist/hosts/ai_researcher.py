@@ -20,6 +20,10 @@ from .ark import render_contract_prompt
 
 
 ORDER = ("idea", "survey", "implementation_plan", "implementation", "experiment_analysis", "paper_writing", "review")
+TEXT_PREVIEW_SUFFIXES = {
+    ".txt", ".csv", ".tsv", ".dat", ".json", ".jsonl", ".ndjson",
+    ".md", ".markdown", ".yaml", ".yml", ".log",
+}
 REQUIRED_TAGS = {
     "idea": ("planning", "literature"), "survey": ("literature",),
     "implementation_plan": ("planning", "experiment"),
@@ -129,7 +133,7 @@ class AIResearcherBridge(HostBridge):
         self.agents = {
             "idea": get_idea_agent(self.model, file_env=file_env),
             "survey": get_survey_agent(self.model, file_env=file_env, code_env=code_env),
-            "implementation_plan": get_coding_plan_agent(self.model, code_env=code_env),
+            "implementation_plan": get_coding_plan_agent(self.model, code_env=code_env, no_reference=True),
             "implementation": get_ml_agent(self.model, code_env=code_env),
             "experiment_analysis": experiment_analysis,
             "paper_writing": Agent(name="Paper Generation Agent", model=self.model,
@@ -227,6 +231,73 @@ class AIResearcherBridge(HostBridge):
     def native_next(self, checkpoint: Checkpoint) -> str | None:
         return None if self.terminal else self._next_native()
 
+    def _planning_resource_context(self) -> str:
+        assert self.workspace is not None
+        info = json.loads((self.workspace / "task_info.json").read_text(encoding="utf-8"))
+        lines = [
+            "Declared resource summary (from task_info.json; observed facts follow):",
+            "- Declared metadata is not evidence of observed file contents.",
+            "- Use observed files and their bounded text previews directly for planning.",
+            "- A bounded data preview does not represent full-dataset statistics.",
+        ]
+        items = info.get("data", []) if isinstance(info.get("data", []), list) else []
+        workspace_root = self.workspace.resolve()
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            declared = item.get("path") or item.get("name")
+            if not declared:
+                continue
+            candidate = self.workspace / str(declared)
+            if not candidate.is_file() and item.get("name"):
+                candidate = self.workspace / "data" / str(item["name"])
+            try:
+                relative = candidate.resolve().relative_to(workspace_root)
+            except (OSError, ValueError):
+                continue
+            if not relative.parts or relative.parts[0] not in {"data", "related_work"}:
+                continue
+            description = str(item.get("description", "")).strip()
+            lines.append(f"- Declared resource: {relative.as_posix()} ({item.get('type', 'resource')}): {description}")
+            if item.get("verified_profile") is not None:
+                lines.append(f"  Declared metadata (not independently re-verified): {json.dumps(item['verified_profile'], sort_keys=True)}")
+            if not candidate.is_file():
+                lines.append(f"  unavailable observed file: {relative.as_posix()} (declared path does not exist; no preview).")
+                continue
+            lines.append(f"  Observed file: {relative.as_posix()} (bytes={candidate.stat().st_size})")
+            if relative.parts[0] != "data":
+                continue
+            if candidate.suffix.lower() not in TEXT_PREVIEW_SUFFIXES:
+                lines.append(
+                    f"  unsupported for text preview (suffix {candidate.suffix or '[none]'}); no conversion or fallback."
+                )
+                continue
+            try:
+                preview_parts: list[str] = []
+                remaining = 2000
+                with candidate.open("r", encoding="utf-8") as handle:
+                    for _ in range(8):
+                        chunk = handle.readline(remaining + 1)
+                        if not chunk:
+                            break
+                        if "\x00" in chunk:
+                            lines.append("  unsupported for text preview (NUL byte detected); no conversion or fallback.")
+                            preview_parts = []
+                            break
+                        chunk = chunk[:remaining]
+                        preview_parts.append(chunk)
+                        remaining -= len(chunk)
+                        if remaining <= 0:
+                            break
+            except UnicodeDecodeError:
+                lines.append("  unsupported for text preview (invalid UTF-8); no conversion or fallback.")
+                continue
+            if not preview_parts:
+                continue
+            lines.append("  bounded data preview (read-only; at most 8 lines / 2000 characters):")
+            lines.extend(f"  {line}" for line in "".join(preview_parts).rstrip("\n").splitlines())
+        return "\n".join(lines)
+
     def invoke(self, capability_id: str, contract: WorkContract | None) -> InvocationResult:
         self._require_initialized()
         if capability_id not in {c.capability_id for c in self._available_cards() if c.available}:
@@ -246,24 +317,8 @@ class AIResearcherBridge(HostBridge):
                 prompt += "\nSurvey these references through the Paper Survey and Code Survey agents before resolving the survey. Record actual findings in notes; if reference code is absent, state that explicitly."
             elif capability_id in {"implementation_plan", "implementation"}:
                 if capability_id == "implementation_plan":
+                    prompt += "\n" + self._planning_resource_context()
                     prompt += "\nModel survey:\n" + self.context["model_survey"]
-                    prompt += (
-                        "\nReference-code availability: this benchmark bridge does not run the native Prepare Agent "
-                        "or supply a prepared reference repository. Review any reference implementation actually "
-                        "present in the workspace. If none is present, state that absence and plan a new implementation "
-                        "from the objective, model survey, and supplied datasets; do not invent implementation references. "
-                        "Record the plan with plan_dataset, plan_training, and plan_testing, then use case_resolved."
-                    )
-                    prompt += (
-                        "\nDataset inspection for planning: inspect the supplied metadata together with the actual file "
-                        "header/structure and a small preview of real records to determine the format, fields, units, "
-                        "and loading requirements. Additional inspection should resolve a specific uncertainty about "
-                        "these requirements; tabular or numeric records are data, not implementation code requiring "
-                        "exhaustive page-by-page review. Record full-dataset statistics and data-quality validation as "
-                        "executable steps in the implementation/testing plan, not as conclusions established by a preview. "
-                        "Once the loading and validation approach is defined, use plan_dataset, plan_training, and "
-                        "plan_testing, then case_resolved."
-                    )
                 prompt += "\nSupplied datasets:\n" + "\n".join(
                     path.as_posix() for path in sorted((self.workspace / "data").rglob("*")) if path.is_file())
                 if capability_id == "implementation":

@@ -278,11 +278,11 @@ class SharedNetSession:
 
     def join(self) -> None:
         coordinator = self._factory(self.invite.base_url, self.invite.room_id)
-        history = coordinator.join(self.invite.token, f"rac:{self.episode_id}")
+        history = coordinator.join(self.invite.token, "rac:coordinator")
         self.coordinator = coordinator
         for role in self.roles:
             member = self._factory(self.invite.base_url, self.invite.room_id)
-            member.join(self.invite.token, f"{self.episode_id}:{role}")
+            member.join(self.invite.token, role)
             self.members[role] = member
         self._consume(history)
 

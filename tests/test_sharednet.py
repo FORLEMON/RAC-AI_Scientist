@@ -7,12 +7,13 @@ from unittest.mock import patch
 
 from rac_ai_scientist.bridge import HostBridge
 from rac_ai_scientist.schemas import InvocationResult
-from rac_ai_scientist.sharednet import RoomMessage, SharedNetInvite, SharedNetSession, _decode, load_sharednet_env
+from rac_ai_scientist.sharednet import RoomClient, RoomError, RoomMessage, SharedNetInvite, SharedNetSession, _decode, load_sharednet_env
 
 
 class FakeRoomClient:
     sequence = 0
     messages_log = []
+    joined_names = []
 
     def __init__(self, base_url, room_id):
         self.base_url = base_url
@@ -24,10 +25,12 @@ class FakeRoomClient:
     def reset(cls):
         cls.sequence = 0
         cls.messages_log = []
+        cls.joined_names = []
 
     def join(self, invite_token, name):
         self.member_id = f"member-{name}"
         self.name = name
+        type(self).joined_names.append(name)
         return list(self.messages_log)
 
     def send(self, content, *, reply_to=None):
@@ -70,6 +73,34 @@ class SharedNetTests(unittest.TestCase):
                 f"ROOM=rom_one TOKEN=rit_{'a' * 43}",
                 room_id="rom_two",
             )
+
+    def test_long_episode_uses_short_join_names_and_keeps_full_envelope_id(self):
+        invite = SharedNetInvite.parse(
+            f"ROOM=rom_long TOKEN=rit_{'a' * 43}",
+            room_id="rom_long",
+        )
+        episode = "pro6_Astronomy_000_evo_scientist_R1_s0_" + "x" * 180
+        session = SharedNetSession(invite, episode, ("researcher", "writer"), client_factory=FakeRoomClient)
+        session.join()
+
+        self.assertEqual(FakeRoomClient.joined_names, ["rac:coordinator", "researcher", "writer"])
+        session.request("researcher", 0, "frame", None)
+        session.result("researcher", 0, "done", "writer")
+        envelopes = [_decode(message.content)[1] for message in FakeRoomClient.messages_log]
+        self.assertTrue(all(item.get("episode_id") == episode for item in envelopes if item))
+
+    def test_join_422_is_still_raised(self):
+        invite = SharedNetInvite.parse(
+            f"ROOM=rom_422 TOKEN=rit_{'a' * 43}",
+            room_id="rom_422",
+        )
+
+        def transport(method, url, headers, body, timeout):
+            return 422, {"error": {"code": "display_name_invalid", "message": "invalid"}}
+
+        client = RoomClient(invite.base_url, invite.room_id, token=invite.token, transport=transport)
+        with self.assertRaisesRegex(RoomError, "SharedNet HTTP 422"):
+            client.join(invite.token, "rac:coordinator")
 
     def test_per_run_dotenv_loads_only_sharednet_settings(self):
         with tempfile.TemporaryDirectory() as raw:
