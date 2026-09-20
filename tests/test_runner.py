@@ -56,10 +56,10 @@ class FakeBridge(HostBridge):
 
 
 class RunnerTests(unittest.TestCase):
-    def test_r5_episode_reaches_terminal_checkpoint(self):
+    def test_r3_episode_reaches_terminal_checkpoint(self):
         with tempfile.TemporaryDirectory() as raw:
             ledger = JsonlLedger(Path(raw) / "trace.jsonl")
-            outcome = EpisodeRunner(FakeBridge(), "R5", ledger).run(hard_hop_limit=3)
+            outcome = EpisodeRunner(FakeBridge(), "R3", ledger).run(hard_hop_limit=3)
             self.assertEqual(outcome.status, "stop")
             self.assertTrue(ledger.path.is_file())
             self.assertGreaterEqual(len(ledger.path.read_text(encoding="utf-8").splitlines()), 4)
@@ -162,13 +162,13 @@ class RunnerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as raw:
             outcome = EpisodeRunner(
-                BudgetRejectedBridge(), "R5", JsonlLedger(Path(raw) / "trace.jsonl")
+                BudgetRejectedBridge(), "R3", JsonlLedger(Path(raw) / "trace.jsonl")
             ).run(hard_hop_limit=10)
         self.assertEqual(outcome.status, "budget_exhausted")
         self.assertEqual(outcome.hops, 1)
         self.assertIn("402", outcome.reason)
 
-    def test_authority_violation_rolls_back_report_and_code_before_escalation(self):
+    def test_authority_violation_warns_without_rollback_when_evidence_is_valid(self):
         class TransactionalBridge(HostBridge):
             host_id = "transactional"
 
@@ -209,10 +209,10 @@ class RunnerTests(unittest.TestCase):
                     (self.workspace / "unauthorized").write_text("bad", encoding="utf-8")
                 return InvocationResult(
                     capability_id,
-                    "",
+                    "completed report",
                     before,
                     snapshot_workspace(self.workspace),
-                    timed_out=True,
+                    proposed_done=True,
                 )
 
             def accept_invocation(self, result, evaluation):
@@ -221,13 +221,70 @@ class RunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             bridge = TransactionalBridge(root)
-            outcome = EpisodeRunner(bridge, "R5", JsonlLedger(root / "trace.jsonl")).run(hard_hop_limit=1)
+            outcome = EpisodeRunner(bridge, "R3", JsonlLedger(root / "trace.jsonl")).run(hard_hop_limit=1)
 
-            self.assertEqual(outcome.status, "escalate")
+            self.assertEqual(outcome.status, "budget_exhausted")
             self.assertEqual(outcome.hops, 1)
-            self.assertFalse((root / "unauthorized").exists())
+            self.assertTrue((root / "unauthorized").exists())
+            self.assertTrue((root / "report" / "report.md").exists())
+            self.assertTrue(bridge.done)
+
+    def test_r3_verification_rejection_is_advisory_and_keeps_workspace(self):
+        class RetryBridge(HostBridge):
+            host_id = "retry"
+
+            def __init__(self, workspace):
+                self.workspace = workspace
+                self.attempts = 0
+                self.done = False
+
+            def initialize(self, **kwargs):
+                pass
+
+            def checkpoint(self):
+                return Checkpoint(
+                    "ep",
+                    self.attempts,
+                    "write",
+                    "write",
+                    snapshot_workspace(self.workspace),
+                    [] if self.done else [Issue("native:write", "native_requirement", "write remains", required_tags=("writing",))],
+                    Budget(10, 10000, 10000, 10, 100, 10),
+                    [CapabilityCard("write", "write", ("writing", "finalize"), (), ("report/**",), ("terminal_report",))],
+                    terminal=self.done,
+                )
+
+            def native_next(self, checkpoint):
+                return "write"
+
+            def transaction_workspace(self):
+                return self.workspace
+
+            def invoke(self, capability_id, contract):
+                before = snapshot_workspace(self.workspace)
+                self.attempts += 1
+                if self.attempts == 1:
+                    scratch = self.workspace / "scratch.txt"
+                    scratch.write_text("not the required report", encoding="utf-8")
+                    return InvocationResult(capability_id, "claimed completion", before, snapshot_workspace(self.workspace))
+                report = self.workspace / "report" / "report.md"
+                report.parent.mkdir(parents=True, exist_ok=True)
+                report.write_text("valid report" * 40, encoding="utf-8")
+                return InvocationResult(capability_id, "completed report", before, snapshot_workspace(self.workspace), proposed_done=True)
+
+            def accept_invocation(self, result, evaluation):
+                self.done = True
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            bridge = RetryBridge(root)
+            outcome = EpisodeRunner(bridge, "R3", JsonlLedger(root / "trace.jsonl")).run(hard_hop_limit=2)
+
+            self.assertEqual(outcome.status, "stop")
+            self.assertEqual(outcome.hops, 1)
+            self.assertEqual(bridge.attempts, 1)
+            self.assertTrue((root / "scratch.txt").exists())
             self.assertFalse((root / "report" / "report.md").exists())
-            self.assertFalse(bridge.done)
 
     def test_pending_retry_cannot_bypass_exhausted_lifecycle_budget(self):
         class RetryingBridge(FakeBridge):
@@ -243,7 +300,7 @@ class RunnerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as raw:
             bridge = RetryingBridge()
-            outcome = EpisodeRunner(bridge, "R5", JsonlLedger(Path(raw) / "trace.jsonl")).run(hard_hop_limit=33)
+            outcome = EpisodeRunner(bridge, "R3", JsonlLedger(Path(raw) / "trace.jsonl")).run(hard_hop_limit=33)
         self.assertEqual(outcome.status, "budget_exhausted")
         self.assertEqual(outcome.hops, 1)
         self.assertEqual(bridge.invocations, 1)
@@ -257,12 +314,12 @@ class RunnerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as raw:
             bridge = TerminalFailureBridge()
-            outcome = EpisodeRunner(bridge, "R5", JsonlLedger(Path(raw) / "trace.jsonl")).run(hard_hop_limit=33)
+            outcome = EpisodeRunner(bridge, "R3", JsonlLedger(Path(raw) / "trace.jsonl")).run(hard_hop_limit=33)
         self.assertEqual(outcome.status, "failed")
         self.assertEqual(bridge.invocations, 1)
         self.assertEqual(outcome.reason, "native provider terminal error")
 
-    def test_recovery_retries_same_capability_without_consuming_control_hop(self):
+    def test_advisory_timeout_preserves_partial_artifact_and_continues(self):
         class RecoveringBridge(HostBridge):
             host_id = "recovering"
 
@@ -305,11 +362,11 @@ class RunnerTests(unittest.TestCase):
             root = Path(raw)
             outcome = EpisodeRunner(
                 RecoveringBridge(root),
-                "R5",
+                "R3",
                 JsonlLedger(root / "trace.jsonl"),
             ).run(hard_hop_limit=2)
 
-            self.assertEqual(outcome.status, "completed")
+            self.assertEqual(outcome.status, "budget_exhausted")
             self.assertEqual(outcome.hops, 2)
             self.assertTrue((root / "outputs" / "result.json").is_file())
             self.assertFalse((root / "unauthorized").exists())

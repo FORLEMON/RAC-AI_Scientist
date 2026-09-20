@@ -36,7 +36,11 @@ class AutoRuntimePinTests(unittest.TestCase):
                     model="FAKE", max_cost_usd=1, max_input_tokens=10, max_output_tokens=10,
                     max_agent_calls=1, max_wall_seconds=10, max_hops=1, host="auto_research_claw",
                     upstream=str(upstream), episode_id="fake", condition="N0", seed=0, review_score_threshold=8)
-                bridge = SimpleNamespace(configure_condition=lambda value: None, initialize_native=lambda **kwargs: None)
+                bridge = SimpleNamespace(
+                    configure_condition=lambda value: None,
+                    initialize=lambda **kwargs: None,
+                    initialize_native=lambda **kwargs: None,
+                )
                 with patch.dict(os.environ, {"AGENT_API_KEY": "FAKE-ONLY", "RAC_HOST_ROOT": "/opt/host"}), \
                      patch("rac_ai_scientist.cli._selected_upstream", return_value=upstream), \
                      patch("rac_ai_scientist.cli.make_bridge", return_value=bridge), \

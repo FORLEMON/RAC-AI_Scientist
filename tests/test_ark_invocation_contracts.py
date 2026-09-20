@@ -47,7 +47,7 @@ class ArkInvocationContractTests(unittest.TestCase):
                 Issue("review:writing:one", "writing", "Clarify the discussion", required_tags=("writing",)),
                 Issue("review:execution:two", "execution", "Repair the experiment", required_tags=("code", "debug")),
             ]
-            policy = SharedPolicy("R5")
+            policy = SharedPolicy("R3")
             checkpoint = bridge.checkpoint()
             decision = policy.decide(checkpoint)
             self.assertEqual(decision.capability_id, "writer")

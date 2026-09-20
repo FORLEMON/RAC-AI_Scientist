@@ -10,9 +10,8 @@ class ConditionTests(unittest.TestCase):
         self.assertTrue(Condition.R2.enables("runtime_routing"))
         self.assertFalse(Condition.R2.enables("work_contracts"))
         self.assertTrue(Condition.R3.enables("work_contracts"))
-        self.assertTrue(Condition.R4.enables("verifier"))
-        self.assertTrue(Condition.R5.enables("recovery"))
+        self.assertTrue(Condition.R3.enables("verifier"))
 
     def test_parse_rejects_unknown_condition(self):
         with self.assertRaises(ValueError):
-            Condition.parse("R6")
+            Condition.parse("R4")

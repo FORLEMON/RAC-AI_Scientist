@@ -16,8 +16,8 @@ from rac_ai_scientist.schemas import Budget, WorkContract
 
 class AutoInstructionContextTests(unittest.TestCase):
     def test_scientific_topic_is_separate_from_both_model_instruction_routes(self):
-        for condition in ("N0", "R1", "R2", "R3", "R4", "R5"):
-            for fail in (False, True) if condition == "R5" else (False,):
+        for condition in ("N0", "R1", "R2", "R3"):
+            for fail in (False, True) if condition == "R3" else (False,):
                 with self.subTest(condition=condition, fail=fail), tempfile.TemporaryDirectory() as raw:
                     root = Path(raw)
                     native_entry = root / "researchclaw/pipeline/runner.py"
@@ -67,6 +67,7 @@ class AutoInstructionContextTests(unittest.TestCase):
                     contract = WorkContract("test", "scope", objective, ("data/**",), ("state/**",), ())
                     coordination = "room context\n" + render_contract_prompt(objective, "scope", contract)
                     with patch.dict(sys.modules, modules), patch.object(bridge, "_install_codegen_parser_adapter"), \
+                         patch.object(bridge, "_install_experiment_adapter"), \
                          patch.object(bridge, "_normalize_products"), \
                          patch.object(bridge, "communication_prompt", side_effect=lambda role, prompt, contract: "room context\n" + prompt):
                         bridge.initialize(episode_id="test", workspace=workspace, objective=objective, seed=0)

@@ -1,13 +1,13 @@
 # RAC × AI Scientist
 
 This repository is the integration and evaluation layer for applying Runtime
-Agent Coordination (RAC) to five active AI-scientist hosts—ARK, Agent
-Laboratory, AI-Researcher, EvoScientist, and AutoResearchClaw—and evaluating
-them on ResearchClawBench. The earlier data-to-paper integration remains for
-historical reproducibility but is excluded from new experiments.
+Agent Coordination (RAC) to three active AI-scientist hosts—ARK, Agent
+Laboratory, and EvoScientist—and evaluating them on ResearchClawBench. Earlier
+data-to-paper, AI-Researcher, and AutoResearchClaw integrations remain for
+historical reproducibility but are excluded from new experiments.
 
 The repository deliberately keeps upstream projects separate. The integration
-package owns the shared N0–R5 policy, schemas, accounting, host bridges, and
+package owns the shared N0–R3 policy, schemas, accounting, host bridges, and
 experiment runner. A host bridge may serialize native state, invoke an existing
 capability, and return artifacts and usage; it must not contain routing,
 acceptance, recovery, or benchmark-specific policy.
@@ -31,13 +31,18 @@ is retained beside it.
 | N0 | Native fixed workflow |
 | R1 | SharedNet runtime communication over the native fixed workflow |
 | R2 | R1 + runtime routing |
-| R3 | R2 + scoped work contracts |
-| R4 | R3 + artifact-grounded verification |
-| R5 | R4 + artifact-preserving recovery |
+| R3 | R2 + scoped work contracts + advisory artifact-grounded verification |
 
 Conditions are cumulative. Within a host/task/seed comparison, model, tools,
 permissions, input artifacts, and lifecycle budget must be identical. Router and
 verifier usage is charged to the same lifecycle budget.
+
+R4 and R5 are retired condition labels and are intentionally rejected by the
+current CLI. Their former contract, verification, and recovery behavior has
+been simplified into R3: the work contract scopes the requested change, the
+verifier records artifact-grounded findings, and that verdict becomes advisory
+context for the next runtime selection. A negative verdict does not stop the
+episode, discard artifacts, or force a retry.
 
 Every N0 episode bypasses the RAC episode runner. The integration layer invokes
 the host-owned top-level lifecycle once and records only the native boundary,
@@ -50,12 +55,13 @@ benchmark schema and nested Docker layout; its N0 compatibility path keeps the
 native MetaChain agents and fixed Level-1 ordering while mapping a sanitized
 ResearchClawBench workspace into that flow. It is reported explicitly as a
 compatibility-native run, not as an unmodified invocation of the upstream CLI.
-R1--R5 continue to use the capability-level RAC runner for every active host.
-All five active bridges use a fresh SharedNet Room as the communication plane
-while RAC remains the routing, verification, transaction, and stopping control
+R1--R3 continue to use the capability-level RAC runner for every active host.
+All three active bridges use a fresh SharedNet Room as the communication plane
+while RAC remains the routing, contract, verification, and stopping control
 plane. R1 keeps each host's declared fixed successor at every hop; runtime
-routing begins at R2. data-to-paper does not join SharedNet and is not part of
-the active experiment matrix.
+routing begins at R2. R3 verification is advisory: every verdict is recorded
+and forwarded to the next selected agent, while artifacts are retained and the
+verdict itself never stops, retries, or rolls back a step.
 
 ## Repository boundary
 
@@ -111,99 +117,232 @@ rac-ai-scientist plan --config configs/experiment.json
 The JSONL plan has stable episode IDs and a config hash, so a scheduler can
 resume without silently duplicating cells.
 
-One fully specified episode is launched with:
+## Starting a live run
+
+The following procedure is the canonical single-episode workflow on a Linux
+host with Docker Compose. Run every formal host/condition/seed cell in a fresh
+episode directory. Do not reuse a SharedNet Room between formal R1--R3 cells.
+
+### 1. Bootstrap and verify the selected upstreams
+
+From the repository root, materialize only the active hosts and benchmark that
+you need. The example below prepares all three active hosts:
 
 ```bash
-rac-ai-scientist run-one \
-  --host ark --condition R5 \
-  --task-dir upstreams/researchclawbench/tasks/Astronomy_000 \
-  --max-cost-usd 20 --max-input-tokens 1000000 \
-  --max-output-tokens 200000 --max-agent-calls 40 \
-  --max-wall-seconds 14400 --max-hops 20
+python3 scripts/bootstrap.py \
+  --only ark \
+  --only agent_laboratory \
+  --only evo_scientist \
+  --only researchclawbench
+
+PYTHONPATH=src python3 -m rac_ai_scientist.cli verify-upstreams \
+  --only ark \
+  --only agent_laboratory \
+  --only evo_scientist \
+  --only researchclawbench
 ```
 
-The command requires `AGENT_MODEL_NAME` and `AGENT_API_KEY`. For every active
-host's R1--R5 episode, create a fresh Room and put its settings in
-`<task-dir>/.env`:
+Use the following exact Compose service, CLI host ID, and build-context
+variable combinations:
+
+| Host | Compose service | `--host` | Build-context variable |
+|---|---|---|---|
+| ARK | `ark` | `ark` | `ARK_CONTEXT` |
+| Agent Laboratory | `agent-laboratory` | `agent_laboratory` | `AGENT_LABORATORY_CONTEXT` |
+| EvoScientist | `evo-scientist` | `evo_scientist` | `EVO_SCIENTIST_CONTEXT` |
+
+### 2. Configure provider and judge credentials
+
+Create the repository `.env` from your private provider configuration. At
+minimum, Compose needs the evaluated model settings below. Configure the judge
+variables as well if the episode will be scored:
 
 ```dotenv
-SHAREDNET_ROOM_ID=rom_example20260917R5
-SHAREDNET_INVITE='ROOM=rom_example20260917R5 TOKEN=rit_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA BASE=https://www.sharednet.ai'
+AGENT_API_BASE=<provider endpoint root>
+AGENT_API_KEY=<private evaluated-model key>
+AGENT_MODEL_NAME=<provider/model identifier>
+
+JUDGE_PROVIDER=<judge adapter name>
+JUDGE_API_BASE=<judge endpoint root>
+JUDGE_API_KEY=<private judge key>
+JUDGE_MODEL_NAME=<judge deployment name>
+JUDGE_API_VERSION=<judge API version>
+JUDGE_MAX_WORKERS=1
 ```
 
-Use `--sharednet-env-file` when the per-run file lives elsewhere. A command-line
-`--sharednet-room-id` overrides the file, and the selected room must match the
-room embedded in the invite. This dotenv file is read before materialization
-and is not copied into the evaluated workspace. The room id is recorded for
-provenance, while the invite token is never written to the episode. N0 neither
-reads nor requires SharedNet configuration. The command creates a fresh
-episode directory, copies only host-visible benchmark inputs, writes an
-append-only coordination ledger, and refuses to reuse an existing episode ID.
+Never commit this file. Do not print populated keys or SharedNet invites in
+logs. Compose reads the repository `.env` automatically, so it normally does
+not need to be sourced into the interactive shell.
 
-## Isolated host images
+### 3. Select one host, task, condition, and lifecycle budget
 
-Each host has a separate image because their dependency stacks conflict. On
-this collected workspace, point Compose at the existing snapshots:
-
-```powershell
-$env:ARK_CONTEXT = "./ARK"
-$env:AGENT_LABORATORY_CONTEXT = "./AgentLaboratory-main"
-$env:DATA_TO_PAPER_CONTEXT = "./data-to-paper-main"
-$env:AI_RESEARCHER_CONTEXT = "./AI-Researcher-main"
-$env:EVO_SCIENTIST_CONTEXT = "./EvoScientist-main"
-$env:AUTO_RESEARCH_CLAW_CONTEXT = "./AutoResearchClaw-main"
-$env:RCB_CONTEXT = "./ResearchClawBench-main"
-docker compose build ark
-docker compose run --rm ark doctor-host --host ark
-```
-
-The three added services follow the same pattern. For example:
-
-```powershell
-docker compose build evo-scientist
-docker compose run --rm evo-scientist doctor-host --host evo_scientist
-```
-
-In a fresh GitHub clone, run `python scripts/bootstrap.py` first and keep the
-default contexts. Before a live run, create a target-free bundle on the host and
-mount only that bundle—never mount the benchmark's full `tasks/` directory into
-an evaluated host:
-
-```powershell
-rac-ai-scientist prepare-task `
-  --task-dir "ResearchClawBench-main/tasks/Astronomy_000" `
-  --output "prepared_tasks/Astronomy_000"
-$env:PREPARED_TASK = "./prepared_tasks/Astronomy_000"
-```
-
-The live container reads `/input/task` and writes to the mounted `/runs`
-directory:
+This example selects Agent Laboratory, `Math_000`, R3, and seed 0. Change
+`SERVICE`, `HOST`, and the matching context variable together when selecting a
+different host. Use exactly the same lifecycle budget across compared
+conditions.
 
 ```bash
-docker compose run --rm <service> run-one --host <host-id> --condition R5 \
-  --task-dir /input/task --run-root /runs \
-  --max-cost-usd 20 --max-input-tokens 1000000 \
-  --max-output-tokens 200000 --max-agent-calls 40 \
-  --max-wall-seconds 14400 --max-hops 20
+export REPO="$(pwd)"
+export TASK=Math_000
+export CONDITION=R3                 # N0, R1, R2, or R3
+export SEED=0
+export SERVICE=agent-laboratory
+export HOST=agent_laboratory
+export AGENT_LABORATORY_CONTEXT=./upstreams/agent_laboratory
+export RCB_CONTEXT=./upstreams/researchclawbench
+
+export MAX_COST_USD=25
+export MAX_INPUT_TOKENS=60000000
+export MAX_OUTPUT_TOKENS=1300000
+export MAX_AGENT_CALLS=900
+export MAX_WALL_SECONDS=21600
+export MAX_HOPS=14
+
+export STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+export PREPARED="$REPO/prepared_tasks/${TASK}_${HOST}_${CONDITION}_${SEED}_${STAMP}"
+export PREPARED_TASK="$PREPARED"
+export RUN_ROOT="$REPO/runs"
+export EPISODE="${HOST}-${TASK,,}-${CONDITION,,}-s${SEED}-${STAMP}"
+mkdir -p "$RUN_ROOT"
 ```
 
-Service/host-id pairs are `ark`/`ark`, `agent-laboratory`/`agent_laboratory`,
-`data-to-paper`/`data_to_paper`, `ai-researcher`/`ai_researcher`,
-`evo-scientist`/`evo_scientist`, and
-`auto-research-claw`/`auto_research_claw`.
+The numbers above are an example, not a universal benchmark budget. A large
+cumulative output budget is not sent as one provider request: host adapters may
+apply a smaller per-request completion cap while accounting all requests
+against the lifecycle total.
 
-After the evaluated host exits, score it in the separate judge image. Only this
-image contains `target_study`:
+### 4. Create a target-free task bundle
+
+Never mount `upstreams/researchclawbench/tasks/<task>` directly into an
+evaluated host because it contains `target_study`. Materialize a sanitized,
+unique bundle instead:
+
+```bash
+PYTHONPATH=src python3 -m rac_ai_scientist.cli prepare-task \
+  --task-dir "$REPO/upstreams/researchclawbench/tasks/$TASK" \
+  --output "$PREPARED"
+
+PYTHONPATH=src python3 -m rac_ai_scientist.cli check-workspace "$PREPARED"
+```
+
+For R1, R2, or R3, create a fresh SharedNet Room and store its values only in
+`$PREPARED/.env`:
+
+```bash
+vim "$PREPARED/.env"
+```
+
+```dotenv
+SHAREDNET_ROOM_ID=rom_example
+SHAREDNET_INVITE='ROOM=rom_example TOKEN=rit_REDACTED BASE=https://www.sharednet.ai'
+SHAREDNET_BASE_URL=https://www.sharednet.ai
+```
+
+The Room ID must match the Room embedded in the invite. The dotenv file is read
+before workspace materialization and is not copied into the evaluated
+workspace. Only the non-secret Room ID is recorded in episode provenance. N0
+does not read or require SharedNet configuration.
+
+### 5. Build and run the zero-model preflight
+
+Each host has a separate image because their dependency stacks conflict. A
+successful unit test does not replace an image build or runtime preflight:
+
+```bash
+docker compose build "$SERVICE"
+test "$?" -eq 0
+
+docker compose run --rm "$SERVICE" \
+  doctor-host --host "$HOST" </dev/null
+
+docker compose run --rm "$SERVICE" \
+  check-workspace /input/task </dev/null
+```
+
+Both preflight commands are zero-model-call checks. Stop if either fails.
+
+### 6. Start the episode
+
+For a long run, first enter a named tmux session so disconnecting SSH does not
+terminate the experiment:
+
+```bash
+export SESSION="${HOST}-${CONDITION,,}-${STAMP}"
+tmux new-session -s "$SESSION"
+```
+
+Inside tmux, restore the exports from steps 3--4 if this is a new shell, then
+start the evaluated host:
+
+```bash
+docker compose run --rm "$SERVICE" run-one \
+  --host "$HOST" \
+  --condition "$CONDITION" \
+  --task-dir /input/task \
+  --sharednet-env-file /input/task/.env \
+  --run-root /runs \
+  --episode-id "$EPISODE" \
+  --seed "$SEED" \
+  --max-cost-usd "$MAX_COST_USD" \
+  --max-input-tokens "$MAX_INPUT_TOKENS" \
+  --max-output-tokens "$MAX_OUTPUT_TOKENS" \
+  --max-agent-calls "$MAX_AGENT_CALLS" \
+  --max-wall-seconds "$MAX_WALL_SECONDS" \
+  --max-hops "$MAX_HOPS" \
+  2>&1 | tee "$REPO/${EPISODE}.run.log"
+```
+
+For N0, omit `--sharednet-env-file`; the native lifecycle must remain
+independent of SharedNet. Detach from tmux with `Ctrl-b d`. Reattach or inspect
+the run with:
+
+```bash
+tmux attach -t "$SESSION"
+tail -F "$REPO/${EPISODE}.run.log"
+```
+
+Do not infer failure merely from a quiet log: some upstream hosts buffer their
+output. Check the container and episode record as well:
+
+```bash
+docker ps --format '{{.ID}} {{.Names}} {{.Status}}'
+test -f "$RUN_ROOT/$EPISODE/episode.json" && \
+  python3 -m json.tool "$RUN_ROOT/$EPISODE/episode.json"
+```
+
+### 7. Score the episode
+
+Scoring runs in a separate image because only the scorer may read
+`target_study`. Build it once per integration revision, then score any episode
+that produced `episode.json`, including failed or budget-exhausted episodes:
 
 ```bash
 docker compose build scorer
+test "$?" -eq 0
+
 docker compose run --rm scorer score-episode \
-  --episode-dir /runs/<episode-id> --benchmark /opt/benchmark
+  --episode-dir "/runs/$EPISODE" \
+  --benchmark /opt/benchmark
 ```
 
-Building images downloads substantial upstream dependencies. `doctor-host` is
-the required zero-model-call gate after a build; image builds and live bridges
-have not been certified merely by the offline unit suite.
+A valid numeric zero is different from an incomplete score. Provider failures,
+parse failures, and missing reports must produce `total_score: null` with an
+error explanation rather than silently becoming zero.
+
+### 8. Archive the evidence
+
+Preserve `episode.json`, `score.json`, `coordination.jsonl`, logs, reports,
+code, and outputs. Exclude every generated `.conda_env/` runtime directory:
+
+```bash
+mkdir -p "$REPO/exports"
+tar --exclude='*/.conda_env' \
+  -czf "$REPO/exports/${EPISODE}.tar.gz" \
+  -C "$RUN_ROOT" "$EPISODE"
+```
+
+Keep failed attempts for audit and always use a new episode ID for a retry.
+`run-one` intentionally refuses to overwrite an existing episode.
 
 ## Integrity rules
 
@@ -211,8 +350,9 @@ have not been certified merely by the offline unit suite.
   ResearchClawBench scorer may read it.
 - Every episode records the host and RAC source revisions, configuration hash,
   task, seed, condition, budget, usage, terminal status, and artifact hashes.
-- An agent's completion statement is not evidence. R4+ accepts work only from
-  persisted effects checked outside the delegate.
+- An agent's completion statement is not evidence. R3 records an external
+  artifact-grounded verdict, but the verdict is advisory and never discards
+  the agent's persisted work.
 - Failed and budget-exhausted episodes remain in the denominator.
 - Host-specific capability names and filesystem paths may appear in bridge data;
   decisions over those declarations live only in the shared package.
@@ -222,7 +362,7 @@ have not been certified merely by the offline unit suite.
 The collected RAC source describes itself as a research alpha. Its reference
 `baselines/algorithms/rac.py` intentionally omits retry/reroute policy, spawn
 templates, disclosure measurement, and in-turn deadlines, while this paper's
-N0–R5 study requires communication, routing, contracts, verification, and recovery.
+N0–R3 study requires communication, routing, contracts, and advisory verification.
 Consequently, its schemas and mechanism invariants are treated as the
 design source, but the complete longitudinal condition profile is implemented
 and tested here. This avoids importing an exploratory baseline and claiming it

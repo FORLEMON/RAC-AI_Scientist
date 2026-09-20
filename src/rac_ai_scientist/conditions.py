@@ -4,14 +4,12 @@ from enum import IntEnum
 
 
 class Condition(IntEnum):
-    """Cumulative experimental conditions."""
+    """Active cumulative experimental conditions."""
 
     N0 = 0
     R1 = 1
     R2 = 2
     R3 = 3
-    R4 = 4
-    R5 = 5
 
     @classmethod
     def parse(cls, value: str | "Condition") -> "Condition":
@@ -28,8 +26,7 @@ class Condition(IntEnum):
             "runtime_communication": self.R1,
             "runtime_routing": self.R2,
             "work_contracts": self.R3,
-            "verifier": self.R4,
-            "recovery": self.R5,
+            "verifier": self.R3,
         }
         try:
             return self >= thresholds[component]

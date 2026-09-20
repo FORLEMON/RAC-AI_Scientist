@@ -24,7 +24,7 @@ class ManifestTests(unittest.TestCase):
         for manifest in manifests:
             self.assertGreater(len(capability_cards(manifest)), 0)
 
-    def test_agent_laboratory_data_preparation_can_write_derived_data_not_source_data(self):
+    def test_agent_laboratory_data_preparation_warns_on_source_data_write(self):
         manifest = load_host_manifest(
             Path(__file__).resolve().parents[1] / "configs" / "hosts" / "agent_laboratory.json"
         )
@@ -51,4 +51,15 @@ class ManifestTests(unittest.TestCase):
             "source", "data/dataset1_cloud_seeding_records/source.csv", "result", "new", 200
         )
         overwritten = InvocationResult(card.capability_id, "prepared", [], [loader, source])
-        self.assertEqual(verify_result(contract, overwritten).verdict.value, "refuted")
+        verification = verify_result(contract, overwritten)
+        self.assertEqual(verification.verdict.value, "supported")
+        authority = next(item for item in verification.checks if item.name == "declared_writes_only")
+        self.assertTrue(authority.passed)
+        self.assertIn("warning:", authority.detail)
+
+    def test_agent_laboratory_experiment_may_refresh_derived_data(self):
+        manifest = load_host_manifest(
+            Path(__file__).resolve().parents[1] / "configs" / "hosts" / "agent_laboratory.json"
+        )
+        card = next(item for item in capability_cards(manifest) if item.capability_id == "running_experiments")
+        self.assertIn("data/processed/**", card.writable_artifacts)

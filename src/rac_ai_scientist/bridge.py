@@ -19,7 +19,7 @@ class HostBridge(ABC):
         self.condition = Condition.parse(condition)
 
     def initialize_communication(self) -> None:
-        """Join one SharedNet member per capability for an R1--R5 episode."""
+        """Join one SharedNet member per capability for an R1--R3 episode."""
         condition = getattr(self, "condition", Condition.N0)
         self.sharednet = None
         if not condition.enables("runtime_communication"):
@@ -27,9 +27,9 @@ class HostBridge(ABC):
         room_id = os.environ.get("SHAREDNET_ROOM_ID", "").strip()
         invite_text = os.environ.get("SHAREDNET_INVITE", "").strip()
         if not room_id:
-            raise ValueError(f"{self.host_id} R1-R5 requires SHAREDNET_ROOM_ID")
+            raise ValueError(f"{self.host_id} R1-R3 requires SHAREDNET_ROOM_ID")
         if not invite_text:
-            raise ValueError(f"{self.host_id} R1-R5 requires SHAREDNET_INVITE")
+            raise ValueError(f"{self.host_id} R1-R3 requires SHAREDNET_INVITE")
         invite = SharedNetInvite.parse(
             invite_text,
             room_id=room_id,
@@ -116,7 +116,7 @@ class HostBridge(ABC):
 
     def accept_invocation(self, result: InvocationResult, evaluation: CoordinationDecision) -> None:
         """Commit host-internal state after verification accepts an invocation."""
-        self._publish_disposition(True, evaluation.reason, result.proposed_next)
+        self._publish_evaluation(evaluation, result.proposed_next)
 
     def reject_invocation(self, result: InvocationResult, evaluation: CoordinationDecision) -> None:
         """Discard host-internal state after verification rejects an invocation."""
@@ -140,6 +140,21 @@ class HostBridge(ABC):
                 reason=reason,
                 next_role=next_role,
             )
+
+    def _publish_evaluation(self, evaluation: CoordinationDecision, next_role: str | None) -> None:
+        sharednet = getattr(self, "sharednet", None)
+        if sharednet is None:
+            return
+        verification = getattr(evaluation, "verification", None)
+        if verification is not None:
+            sharednet.verification(
+                self.hop - 1,
+                verdict=verification.verdict.value,
+                reason=evaluation.reason,
+                next_role=next_role,
+            )
+        else:
+            self._publish_disposition(True, evaluation.reason, next_role)
 
 
 class BridgeContractError(RuntimeError):

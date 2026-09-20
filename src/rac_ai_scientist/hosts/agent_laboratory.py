@@ -39,6 +39,28 @@ REQUIRED_TAGS = {
     "report_refinement": ("terminal_review",),
 }
 
+# The lifecycle output budget is cumulative across the entire episode.  It must
+# not be sent verbatim as one request's ``max_tokens``: a generous lifecycle
+# budget can be larger than the provider's context window and get rejected
+# before inference starts.  Keep a conservative per-request ceiling while still
+# allowing many calls to consume the full lifecycle allowance over time.
+MAX_COMPLETION_TOKENS_PER_REQUEST = 65_536
+
+
+def _request_completion_limit(remaining_output_tokens: int) -> int:
+    """Return a context-safe per-request limit from the cumulative remainder."""
+    if remaining_output_tokens <= 0:
+        raise RuntimeError("lifecycle output-token budget exhausted")
+    return min(remaining_output_tokens, MAX_COMPLETION_TOKENS_PER_REQUEST)
+
+
+def _is_terminal_provider_error(exc: Exception) -> bool:
+    """Identify deterministic request/configuration failures that cannot retry."""
+    status_code = getattr(exc, "status_code", None)
+    if status_code is None:
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    return type(exc).__name__ == "BadRequestError" or status_code in {400, 401, 403, 404, 422}
+
 
 class _ArxivTimedSession:
     def __init__(self, inner):
@@ -48,10 +70,45 @@ class _ArxivTimedSession:
         return self.inner.get(url, timeout=(5, 30), **kwargs)
 
 
-def _install_arxiv_transport() -> None:
-    """Bound Agent Laboratory's pinned arxiv.py transport and surface search failures."""
+def _local_literature(workspace: Path) -> dict[str, dict[str, str]]:
+    """Load benchmark-supplied PDFs for Agent Laboratory's native literature tools."""
+    papers: dict[str, dict[str, str]] = {}
+    related_work = workspace / "related_work"
+    if not related_work.is_dir():
+        return papers
+    from pypdf import PdfReader
+
+    for index, path in enumerate(sorted(related_work.glob("*.pdf"))):
+        try:
+            reader = PdfReader(str(path))
+            pages = []
+            for page_number, page in enumerate(reader.pages, start=1):
+                text = page.extract_text() or ""
+                pages.append(f"--- Page {page_number} ---\n{text}")
+        except Exception:
+            continue
+        full_text = "\n".join(pages).strip()
+        if not full_text:
+            continue
+        metadata = getattr(reader, "metadata", None)
+        title = str(getattr(metadata, "title", "") or path.stem).strip()
+        paper_id = f"local-paper-{index:03d}"
+        papers[paper_id] = {
+            "title": title,
+            "summary": " ".join(full_text.split())[:3000],
+            "full_text": full_text[:50000],
+            "path": path.relative_to(workspace).as_posix(),
+        }
+    return papers
+
+
+def _install_arxiv_transport(workspace: Path | None = None) -> int:
+    """Prefer supplied PDFs; otherwise bound arxiv.py and surface search failures."""
     import arxiv
     from tools import ArxivSearch
+
+    local_papers = _local_literature(workspace) if workspace is not None else {}
+    ArxivSearch._rac_local_papers = local_papers
 
     original_init = arxiv.Client.__init__
     if not getattr(original_init, "_rac_deadline", False):
@@ -81,6 +138,17 @@ def _install_arxiv_transport() -> None:
     original_search = ArxivSearch.find_papers_by_str
     if not getattr(original_search, "_rac_error", False):
         def find_papers_by_str(search, query, N=20):
+            supplied = getattr(type(search), "_rac_local_papers", {})
+            if supplied:
+                summaries = []
+                for paper_id, paper in list(supplied.items())[:N]:
+                    summaries.append(
+                        f"Title: {paper['title']}\n"
+                        f"Summary: {paper['summary']}\n"
+                        f"Publication Date: supplied benchmark input\n"
+                        f"arXiv paper ID: {paper_id}"
+                    )
+                return "\n\n".join(summaries)
             search.sch_engine._rac_search_error = None
             papers = original_search(search, query, N)
             if papers is None:
@@ -92,6 +160,22 @@ def _install_arxiv_transport() -> None:
 
         find_papers_by_str._rac_error = True
         ArxivSearch.find_papers_by_str = find_papers_by_str
+
+    original_full_text = ArxivSearch.retrieve_full_paper_text
+    if not getattr(original_full_text, "_rac_local", False):
+        def retrieve_full_paper_text(search, query, MAX_LEN=50000):
+            supplied = getattr(type(search), "_rac_local_papers", {})
+            paper = supplied.get(query.strip())
+            if paper is not None:
+                return paper["full_text"][:MAX_LEN]
+            if supplied:
+                available = ", ".join(sorted(supplied))
+                raise ValueError(f"unknown supplied local paper id {query!r}; available ids: {available}")
+            return original_full_text(search, query, MAX_LEN=MAX_LEN)
+
+        retrieve_full_paper_text._rac_local = True
+        ArxivSearch.retrieve_full_paper_text = retrieve_full_paper_text
+    return len(local_papers)
 
 
 def _install_hf_data_search(workspace: Path) -> None:
@@ -200,7 +284,7 @@ class AgentLaboratoryBridge(HostBridge):
             os.chdir(self.workspace)
             from ai_lab_repo import LaboratoryWorkflow
 
-            _install_arxiv_transport()
+            local_paper_count = _install_arxiv_transport(self.workspace)
             _install_hf_data_search(self.workspace)
             _install_report_writing_scope()
             _install_edit_range_validation()
@@ -229,6 +313,18 @@ class AgentLaboratoryBridge(HostBridge):
                 agentRxiv=False,
             )
             self.workflow.phd.max_hist_len = 10
+            if isinstance(local_paper_count, int) and local_paper_count > 0:
+                # The benchmark bundle is the complete allowed literature set.
+                # Do not keep iterating toward the upstream default of five when
+                # fewer valid PDFs were supplied.
+                self.workflow.num_papers_lit_review = min(
+                    self.workflow.num_papers_lit_review,
+                    local_paper_count,
+                )
+                self.workflow.num_ref_papers = min(
+                    self.workflow.num_ref_papers,
+                    local_paper_count,
+                )
             self._save()
         finally:
             os.chdir(previous)
@@ -281,6 +377,8 @@ class AgentLaboratoryBridge(HostBridge):
         assert self.workspace is not None
         return (
             f"Work only inside {self.workspace}. Use the supplied data/ and related_work/. "
+            "When related_work contains PDFs, use those supplied papers before any external literature search; "
+            "external arXiv research is only a fallback when no local PDF is supplied. "
             "The hidden target study is unavailable and must not be sought. Persist code under code/, "
             "results under outputs/, and the final ResearchClawBench report at report/report.md. "
             "Saved code must use workspace-relative paths; never embed the episode path."
@@ -335,6 +433,7 @@ class AgentLaboratoryBridge(HostBridge):
         cost_before = self.provider_cost_usd
         output = io.StringIO()
         error = None
+        terminal_error = False
         started = time.monotonic()
         previous = Path.cwd()
         proposed_done = False
@@ -369,6 +468,7 @@ class AgentLaboratoryBridge(HostBridge):
             self._normalize_report()
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
+            terminal_error = _is_terminal_provider_error(exc)
         finally:
             os.chdir(previous)
             self.hop += 1
@@ -390,6 +490,7 @@ class AgentLaboratoryBridge(HostBridge):
             ),
             error=error,
             proposed_done=proposed_done,
+            terminal_error=terminal_error,
         )
 
     def _available_cards(self):
@@ -488,7 +589,9 @@ class AgentLaboratoryBridge(HostBridge):
                 request["temperature"] = temp
             request["max_tokens"] = min(
                 1024 if "Phase: literature review" in prompt else 16384,
-                max(1, self.initial_budget.output_tokens - self.output_tokens),
+                _request_completion_limit(
+                    self.initial_budget.output_tokens - self.output_tokens
+                ),
             )
             response = client.chat.completions.create(**request)
             self.provider_calls += 1
