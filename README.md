@@ -12,6 +12,18 @@ experiment runner. A host bridge may serialize native state, invoke an existing
 capability, and return artifacts and usage; it must not contain routing,
 acceptance, recovery, or benchmark-specific policy.
 
+## Architecture
+
+![RAC AI Scientist architecture](docs/assets/architecture/rac_ai_scientist_architecture.png)
+
+The diagram follows the N0 native path, the cumulative R1–R5 coordination path,
+the five active host boundaries, persisted evidence, and independent scoring. It
+is pinned to upstream revision `91fc6d1e4eee0d1ecb94874a0ac461fd7fa21785`.
+The [interactive HTML](docs/assets/architecture/rac_ai_scientist_architecture.html)
+can be opened locally, and the
+[editable diagram specification](docs/assets/architecture/rac_ai_scientist_architecture.json)
+is retained beside it.
+
 ## Experimental conditions
 
 | ID | Enabled coordination mechanisms |

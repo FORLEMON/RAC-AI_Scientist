@@ -1,0 +1,529 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "RAC × AI Scientist：统一协调与 ResearchClawBench 评测架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": "rac_ai_scientist_architecture.html",
+    "viewBox": [
+      1800,
+      980
+    ],
+    "repository": {
+      "url": "https://github.com/FORLEMON/RAC-AI_Scientist",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "91fc6d1e4eee0d1ecb94874a0ac461fd7fa21785"
+    },
+    "views": [
+      {
+        "id": "episode-path",
+        "label": "R1–R5 单次 Episode",
+        "focus": [
+          "rcb",
+          "runner",
+          "policy",
+          "bridge",
+          "active_hosts",
+          "workspace",
+          "scorer"
+        ],
+        "note": "从 sanitized benchmark 输入，经共享 RAC 控制面与 HostBridge 调用，到 artifact 落盘和独立评分。"
+      },
+      {
+        "id": "native-path",
+        "label": "N0 原生路径",
+        "focus": [
+          "rcb",
+          "native",
+          "active_hosts",
+          "workspace",
+          "scorer"
+        ],
+        "note": "N0 绕过 RAC episode runner，直接执行 host-owned top-level lifecycle，只记录边界、artifact 与 usage。"
+      },
+      {
+        "id": "condition-ladder",
+        "label": "N0–R5 条件梯度",
+        "focus": [
+          "sharednet",
+          "policy",
+          "verifier"
+        ],
+        "note": "R1 communication，R2 routing，R3 contracts，R4 verifier，R5 artifact-preserving recovery。"
+      },
+      {
+        "id": "host-boundary",
+        "label": "Host 适配边界",
+        "focus": [
+          "bridge",
+          "active_hosts",
+          "historical_dtp"
+        ],
+        "note": "Bridge 只做 state/capability/artifact 翻译和调用，不拥有 routing、acceptance、recovery 或 stopping policy。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "rcb",
+      "type": "external",
+      "label": "ResearchClawBench",
+      "sublabel": "task + data + related_work",
+      "tag": "target_study 隔离",
+      "pos": [
+        40,
+        410
+      ],
+      "size": [
+        210,
+        84
+      ],
+      "sources": [
+        {
+          "path": "README.md",
+          "label": "Benchmark integrity"
+        },
+        {
+          "path": "docs/architecture.md",
+          "label": "Benchmark boundary"
+        }
+      ]
+    },
+    {
+      "id": "native",
+      "type": "backend",
+      "label": "N0 Native Scheduler",
+      "sublabel": "host-owned top-level lifecycle",
+      "tag": "绕过 RAC runner",
+      "pos": [
+        360,
+        160
+      ],
+      "size": [
+        230,
+        90
+      ],
+      "sources": [
+        {
+          "path": "README.md",
+          "label": "N0 semantics"
+        },
+        {
+          "path": "docs/architecture.md",
+          "label": "Condition boundary"
+        }
+      ]
+    },
+    {
+      "id": "runner",
+      "type": "backend",
+      "label": "R1–R5 Episode Runner",
+      "sublabel": "checkpoint → decide → invoke → evaluate",
+      "tag": "budget / hop / transaction",
+      "pos": [
+        360,
+        420
+      ],
+      "size": [
+        230,
+        96
+      ],
+      "sources": [
+        {
+          "path": "src/rac_ai_scientist/runner.py",
+          "label": "EpisodeRunner"
+        }
+      ]
+    },
+    {
+      "id": "policy",
+      "type": "security",
+      "label": "Shared N0–R5 Policy",
+      "sublabel": "host-neutral coordination control plane",
+      "tag": "R2 route · R3 contract",
+      "pos": [
+        690,
+        420
+      ],
+      "size": [
+        260,
+        96
+      ],
+      "sources": [
+        {
+          "path": "src/rac_ai_scientist/conditions.py",
+          "label": "Condition thresholds"
+        },
+        {
+          "path": "src/rac_ai_scientist/policy.py",
+          "label": "SharedPolicy"
+        }
+      ]
+    },
+    {
+      "id": "sharednet",
+      "type": "messagebus",
+      "label": "SharedNet Room",
+      "sublabel": "runtime communication plane",
+      "tag": "五个 active host · R1–R5",
+      "pos": [
+        1390,
+        160
+      ],
+      "size": [
+        280,
+        84
+      ],
+      "sources": [
+        {
+          "path": "src/rac_ai_scientist/sharednet.py",
+          "label": "Room transport"
+        },
+        {
+          "path": "README.md",
+          "label": "Active host communication"
+        }
+      ]
+    },
+    {
+      "id": "verifier",
+      "type": "security",
+      "label": "Verifier + Recovery",
+      "sublabel": "artifact diff · evidence checks · rollback/preserve",
+      "tag": "R4 verify · R5 recover",
+      "pos": [
+        690,
+        700
+      ],
+      "size": [
+        260,
+        96
+      ],
+      "sources": [
+        {
+          "path": "src/rac_ai_scientist/policy.py",
+          "label": "verify_result"
+        },
+        {
+          "path": "src/rac_ai_scientist/artifacts.py",
+          "label": "WorkspaceTransaction"
+        }
+      ]
+    },
+    {
+      "id": "bridge",
+      "type": "backend",
+      "label": "HostBridge Protocol",
+      "sublabel": "normalize state · expose capability · invoke",
+      "tag": "translation, not policy",
+      "pos": [
+        1040,
+        420
+      ],
+      "size": [
+        250,
+        96
+      ],
+      "sources": [
+        {
+          "path": "src/rac_ai_scientist/bridge.py",
+          "label": "HostBridge"
+        },
+        {
+          "path": "docs/architecture.md",
+          "label": "Bridge boundary"
+        }
+      ]
+    },
+    {
+      "id": "active_hosts",
+      "type": "cloud",
+      "label": "5 Active AI Scientist Hosts",
+      "sublabel": "ARK · Agent Laboratory · AI-Researcher · EvoScientist · AutoResearchClaw",
+      "tag": "独立 Docker / Python stack",
+      "pos": [
+        1390,
+        360
+      ],
+      "size": [
+        330,
+        190
+      ],
+      "sources": [
+        {
+          "path": "README.md",
+          "label": "Active matrix"
+        },
+        {
+          "path": "configs/hosts/ark.json",
+          "label": "Example capability cards"
+        },
+        {
+          "path": "compose.yaml",
+          "label": "Isolated services"
+        }
+      ]
+    },
+    {
+      "id": "historical_dtp",
+      "type": "external",
+      "label": "data-to-paper",
+      "sublabel": "historical reproducibility bridge",
+      "tag": "excluded from new active matrix",
+      "pos": [
+        1040,
+        160
+      ],
+      "size": [
+        250,
+        84
+      ],
+      "sources": [
+        {
+          "path": "README.md",
+          "label": "Historical status"
+        },
+        {
+          "path": "configs/hosts/data_to_paper.json",
+          "label": "Retained bridge config"
+        }
+      ]
+    },
+    {
+      "id": "model_apis",
+      "type": "external",
+      "label": "External Model APIs",
+      "sublabel": "Agent model + Judge model endpoints",
+      "tag": "provider usage 计入预算/评分",
+      "pos": [
+        1390,
+        20
+      ],
+      "size": [
+        280,
+        84
+      ],
+      "sources": [
+        {
+          "path": "compose.yaml",
+          "label": "Agent/Judge env"
+        }
+      ]
+    },
+    {
+      "id": "workspace",
+      "type": "database",
+      "label": "Episode Workspace + Ledger",
+      "sublabel": "runs/ · JSON/JSONL · artifacts · usage · hashes",
+      "tag": "append-only coordination trace",
+      "pos": [
+        1040,
+        700
+      ],
+      "size": [
+        280,
+        96
+      ],
+      "sources": [
+        {
+          "path": "README.md",
+          "label": "Episode records"
+        },
+        {
+          "path": "src/rac_ai_scientist/ledger.py",
+          "label": "JsonlLedger"
+        }
+      ]
+    },
+    {
+      "id": "scorer",
+      "type": "backend",
+      "label": "Independent RCB Scorer",
+      "sublabel": "terminal report + hidden checklist/target",
+      "tag": "单独 scorer image",
+      "pos": [
+        1410,
+        700
+      ],
+      "size": [
+        280,
+        96
+      ],
+      "sources": [
+        {
+          "path": "README.md",
+          "label": "Scoring flow"
+        },
+        {
+          "path": "compose.yaml",
+          "label": "Scorer service"
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "rcb-native",
+      "from": "rcb",
+      "to": "native",
+      "label": "N0 task",
+      "variant": "default",
+      "route": "auto"
+    },
+    {
+      "id": "native-host",
+      "from": "native",
+      "to": "active_hosts",
+      "label": "native lifecycle",
+      "variant": "default",
+      "route": "auto"
+    },
+    {
+      "id": "rcb-runner",
+      "from": "rcb",
+      "to": "runner",
+      "label": "R1–R5 task",
+      "variant": "emphasis",
+      "route": "auto"
+    },
+    {
+      "id": "runner-policy",
+      "from": "runner",
+      "to": "policy",
+      "label": "checkpoint + budget",
+      "variant": "emphasis",
+      "route": "auto"
+    },
+    {
+      "id": "policy-bridge",
+      "from": "policy",
+      "to": "bridge",
+      "label": "R2 select / R3 contract",
+      "variant": "emphasis",
+      "route": "auto"
+    },
+    {
+      "id": "bridge-host",
+      "from": "bridge",
+      "to": "active_hosts",
+      "label": "invoke capability",
+      "variant": "emphasis",
+      "route": "auto"
+    },
+    {
+      "id": "hosts-sharednet",
+      "from": "active_hosts",
+      "to": "sharednet",
+      "label": "typed work events",
+      "variant": "dashed",
+      "route": "auto"
+    },
+    {
+      "id": "hosts-model",
+      "from": "active_hosts",
+      "to": "model_apis",
+      "label": "agent calls",
+      "variant": "dashed",
+      "route": "auto"
+    },
+    {
+      "id": "hosts-workspace",
+      "from": "active_hosts",
+      "to": "workspace",
+      "label": "persist artifacts",
+      "variant": "default",
+      "route": "auto"
+    },
+    {
+      "id": "runner-ledger",
+      "from": "runner",
+      "to": "workspace",
+      "label": "append ledger",
+      "variant": "dashed",
+      "route": "auto"
+    },
+    {
+      "id": "workspace-verifier",
+      "from": "workspace",
+      "to": "verifier",
+      "label": "artifact diff evidence",
+      "variant": "security",
+      "route": "auto"
+    },
+    {
+      "id": "verifier-runner",
+      "from": "verifier",
+      "to": "runner",
+      "label": "SUPPORTED / REFUTED / RECOVER",
+      "variant": "security",
+      "route": "auto"
+    },
+    {
+      "id": "bridge-dtp",
+      "from": "bridge",
+      "to": "historical_dtp",
+      "label": "historical only",
+      "variant": "dashed",
+      "route": "auto"
+    },
+    {
+      "id": "workspace-scorer",
+      "from": "workspace",
+      "to": "scorer",
+      "label": "terminal report + manifest",
+      "variant": "emphasis",
+      "route": "auto"
+    },
+    {
+      "id": "rcb-scorer",
+      "from": "rcb",
+      "to": "scorer",
+      "label": "hidden target / checklist",
+      "variant": "security",
+      "route": "auto"
+    },
+    {
+      "id": "scorer-model",
+      "from": "scorer",
+      "to": "model_apis",
+      "label": "judge request",
+      "variant": "dashed",
+      "route": "auto"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "N0–R5 累积条件",
+      "items": [
+        "N0：原生 fixed workflow",
+        "R1：+ SharedNet runtime communication（仍走原生 successor）",
+        "R2：+ runtime routing",
+        "R3：+ scoped work contracts",
+        "R4：+ artifact-grounded verification",
+        "R5：+ artifact-preserving recovery"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "当前实验矩阵",
+      "items": [
+        "Active：ARK、Agent Laboratory、AI-Researcher、EvoScientist、AutoResearchClaw",
+        "Historical：data-to-paper bridge 保留用于复现实验，但退出新 active matrix",
+        "R1–R5 的五个 active host 均使用 fresh SharedNet Room"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "可信评测边界",
+      "items": [
+        "Host 只收到 task / data / related_work；永远看不到 target_study",
+        "Router / verifier 的调用与开销计入相同 lifecycle budget",
+        "失败与 budget-exhausted episode 保留在 denominator",
+        "Agent 自报完成不是证据；R4+ 只认 persisted effects"
+      ]
+    }
+  ]
+}

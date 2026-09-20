@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RAC × AI Scientist：统一协调与 ResearchClawBench 评测架构</title>
+<style>
+:root{--bg:#f6f8fb;--panel:#ffffff;--panel2:#f2f6fa;--text:#18212f;--muted:#5f6b7a;--line:#9aa8b8;--border:#d9e1ea;--cyan:#0b8bd6;--teal:#0d9d83;--rose:#d14a61;--violet:#7b61c9;--amber:#b67b11;--shadow:0 12px 32px rgba(32,51,72,.10);--node:#fff;--nodeStroke:#cfd8e3;--labelBg:#fff;}
+html[data-theme="dark"]{--bg:#11151b;--panel:#171c23;--panel2:#1d2430;--text:#e8edf3;--muted:#9aa7b5;--line:#69788b;--border:#2b3440;--cyan:#56b7ff;--teal:#53d6bb;--rose:#ff718a;--violet:#b099ff;--amber:#efb84e;--shadow:0 16px 36px rgba(0,0,0,.28);--node:#1b222c;--nodeStroke:#364353;--labelBg:#171c23;}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;height:100vh;overflow:hidden}
+.shell{height:100vh;display:grid;grid-template-rows:64px 50px 1fr 188px;gap:0}
+header{display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid var(--border);background:var(--panel)}
+.title-wrap h1{font-size:19px;margin:0 0 3px;font-weight:750;letter-spacing:.1px} .meta{font-size:12px;color:var(--muted)}
+.actions{display:flex;gap:8px;align-items:center} button,.search{border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:10px;padding:8px 10px;font:inherit} button{cursor:pointer} button:hover{border-color:var(--cyan)}
+.toolbar{display:flex;align-items:center;gap:8px;padding:7px 20px;border-bottom:1px solid var(--border);background:var(--panel)} .toolbar .spacer{flex:1} .search{width:240px;outline:none} .search:focus{border-color:var(--cyan)}
+.diagram-panel{position:relative;background:radial-gradient(circle at 20% 20%,rgba(86,183,255,.07),transparent 28%),var(--panel);overflow:hidden}
+svg{display:block;width:100%;height:100%}
+.node{cursor:pointer;transition:opacity .18s ease,filter .18s ease} .node rect{fill:var(--node);stroke:var(--nodeStroke);stroke-width:1.6;filter:drop-shadow(0 7px 12px rgba(20,35,55,.08))} html[data-theme="dark"] .node rect{filter:drop-shadow(0 9px 14px rgba(0,0,0,.28))}
+.node:hover rect,.node.focused rect{stroke:var(--cyan);stroke-width:2.8} .node.dimmed{opacity:.16}
+.node-label{fill:var(--text);font-size:16px;font-weight:750} .node-sub{fill:var(--muted);font-size:12.6px} .node-tag{fill:var(--muted);font-size:11.2px;font-weight:650}
+.node-dot{fill:var(--cyan)} .type-security .node-dot{fill:var(--rose)} .type-messagebus .node-dot{fill:var(--violet)} .type-database .node-dot{fill:var(--teal)} .type-external .node-dot{fill:var(--amber)}
+.edge path{fill:none;stroke:var(--line);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round} .variant-emphasis path{stroke:var(--cyan);stroke-width:2.4} .variant-security path{stroke:var(--rose);stroke-width:2.2} .variant-dashed path{stroke-dasharray:7 7} .edge.dimmed{opacity:.10} .edge.focused path{stroke-width:3.2;filter:drop-shadow(0 0 4px rgba(86,183,255,.45))}
+.edge-label rect{fill:var(--labelBg);stroke:var(--border);stroke-width:1} .edge-label text{fill:var(--muted);font-size:11.4px;font-weight:650}
+.cards{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;padding:12px 18px 16px;border-top:1px solid var(--border);background:var(--bg)} .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow);min-width:0} .card h3{font-size:13px;margin:0 0 7px;display:flex;align-items:center;gap:7px} .card ul{margin:0;padding-left:18px;color:var(--muted);font-size:11.8px;line-height:1.45} .card li{margin:2px 0} .dot{width:8px;height:8px;border-radius:50%;background:var(--cyan)} .card-emerald .dot{background:var(--teal)} .card-rose .dot{background:var(--rose)}
+.drawer{position:absolute;right:16px;top:16px;width:330px;max-height:calc(100% - 32px);overflow:auto;background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:15px;display:none;z-index:8} .drawer.show{display:block} .drawer h2{font-size:15px;margin:0 0 6px} .drawer p{color:var(--muted);margin:0 0 10px;font-size:12px} .drawer a{display:block;padding:8px 9px;border:1px solid var(--border);border-radius:9px;margin:6px 0;color:var(--cyan);text-decoration:none;background:var(--panel2);font-size:12px} .drawer a:hover{border-color:var(--cyan)}
+.badge{display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:99px;padding:3px 8px;color:var(--muted);font-size:11px;background:var(--panel2)}
+@media(max-width:1100px){body{overflow:auto;height:auto} .shell{height:auto;grid-template-rows:64px auto 650px auto} .toolbar{flex-wrap:wrap} .cards{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="shell">
+<header>
+  <div class="title-wrap"><h1>RAC × AI Scientist：统一协调与 ResearchClawBench 评测架构</h1><div class="meta">Repository-pinned evidence · revision <code>91fc6d1e4e</code> · spec SHA-256 <code>170d410ca9b6</code></div></div>
+  <div class="actions"><span class="badge">architecture · showcase</span><button id="themeBtn">Light / Dark</button><button id="resetBtn">Reset</button></div>
+</header>
+<div class="toolbar">
+  <button class="view-btn" data-focus="rcb,runner,policy,bridge,active_hosts,workspace,scorer" title="从 sanitized benchmark 输入，经共享 RAC 控制面与 HostBridge 调用，到 artifact 落盘和独立评分。">R1–R5 单次 Episode</button><button class="view-btn" data-focus="rcb,native,active_hosts,workspace,scorer" title="N0 绕过 RAC episode runner，直接执行 host-owned top-level lifecycle，只记录边界、artifact 与 usage。">N0 原生路径</button><button class="view-btn" data-focus="sharednet,policy,verifier" title="R1 communication，R2 routing，R3 contracts，R4 verifier，R5 artifact-preserving recovery。">N0–R5 条件梯度</button><button class="view-btn" data-focus="bridge,active_hosts,historical_dtp" title="Bridge 只做 state/capability/artifact 翻译和调用，不拥有 routing、acceptance、recovery 或 stopping policy。">Host 适配边界</button>
+  <div class="spacer"></div>
+  <input id="search" class="search" placeholder="搜索组件，例如 SharedNet / scorer" />
+</div>
+<main class="diagram-panel">
+  <svg id="diagram" viewBox="0 0 1800 980" preserveAspectRatio="xMidYMid meet" aria-label="RAC AI Scientist architecture diagram">
+    <defs>
+      <marker id="arrow-default" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--line)"/></marker>
+      <marker id="arrow-emphasis" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--cyan)"/></marker>
+      <marker id="arrow-security" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--rose)"/></marker>
+      <marker id="arrow-dashed" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--line)"/></marker>
+    </defs>
+    <g class="edges"><g class="edge variant-default" data-id="rcb-native" data-from="rcb" data-to="native">
+      <path d="M 250 452.0 L 290 452 L 290 205 L 360 205.0" marker-end="url(#arrow-default)"/>
+      <g class="edge-label" transform="translate(300.0,328.5)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">N0 task</text></g>
+    </g><g class="edge variant-default" data-id="native-host" data-from="native" data-to="active_hosts">
+      <path d="M 590 205.0 L 650 205 L 650 320 L 1555 320 L 1555.0 360" marker-end="url(#arrow-default)"/>
+      <g class="edge-label" transform="translate(1102.5,310.0)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">native lifecycle</text></g>
+    </g><g class="edge variant-emphasis" data-id="rcb-runner" data-from="rcb" data-to="runner">
+      <path d="M 250 452.0 L 360 468.0" marker-end="url(#arrow-emphasis)"/>
+      <g class="edge-label" transform="translate(305.0,450.0)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">R1–R5 task</text></g>
+    </g><g class="edge variant-emphasis" data-id="runner-policy" data-from="runner" data-to="policy">
+      <path d="M 590 468.0 L 690 468.0" marker-end="url(#arrow-emphasis)"/>
+      <g class="edge-label" transform="translate(640.0,458.0)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">checkpoint + budget</text></g>
+    </g><g class="edge variant-emphasis" data-id="policy-bridge" data-from="policy" data-to="bridge">
+      <path d="M 950 468.0 L 1040 468.0" marker-end="url(#arrow-emphasis)"/>
+      <g class="edge-label" transform="translate(995.0,458.0)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">R2 select / R3 contract</text></g>
+    </g><g class="edge variant-emphasis" data-id="bridge-host" data-from="bridge" data-to="active_hosts">
+      <path d="M 1290 468.0 L 1390 455.0" marker-end="url(#arrow-emphasis)"/>
+      <g class="edge-label" transform="translate(1340.0,451.5)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">invoke capability</text></g>
+    </g><g class="edge variant-dashed" data-id="hosts-sharednet" data-from="active_hosts" data-to="sharednet">
+      <path d="M 1555.0 360 L 1530.0 244" marker-end="url(#arrow-dashed)"/>
+      <g class="edge-label" transform="translate(1552.5,302.0)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">typed work events</text></g>
+    </g><g class="edge variant-dashed" data-id="hosts-model" data-from="active_hosts" data-to="model_apis">
+      <path d="M 1555.0 360 L 1555 300 L 1730 300 L 1730 130 L 1530 130 L 1530.0 104" marker-end="url(#arrow-dashed)"/>
+      <g class="edge-label" transform="translate(1630.0,120.0)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">agent calls</text></g>
+    </g><g class="edge variant-default" data-id="hosts-workspace" data-from="active_hosts" data-to="workspace">
+      <path d="M 1555.0 550 L 1555 620 L 1350 620 L 1350 748 L 1320 748.0" marker-end="url(#arrow-default)"/>
+      <g class="edge-label" transform="translate(1452.5,610.0)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">persist artifacts</text></g>
+    </g><g class="edge variant-dashed" data-id="runner-ledger" data-from="runner" data-to="workspace">
+      <path d="M 475.0 516 L 475 625 L 980 625 L 980 748 L 1040 748.0" marker-end="url(#arrow-dashed)"/>
+      <g class="edge-label" transform="translate(727.5,615.0)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">append ledger</text></g>
+    </g><g class="edge variant-security" data-id="workspace-verifier" data-from="workspace" data-to="verifier">
+      <path d="M 1040 748.0 L 950 748.0" marker-end="url(#arrow-security)"/>
+      <g class="edge-label" transform="translate(995.0,738.0)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">artifact diff evidence</text></g>
+    </g><g class="edge variant-security" data-id="verifier-runner" data-from="verifier" data-to="runner">
+      <path d="M 690 748.0 L 620 748 L 620 610 L 475 610 L 475.0 516" marker-end="url(#arrow-security)"/>
+      <g class="edge-label" transform="translate(547.5,600.0)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">SUPPORTED / REFUTED / RECOVER</text></g>
+    </g><g class="edge variant-dashed" data-id="bridge-dtp" data-from="bridge" data-to="historical_dtp">
+      <path d="M 1165.0 420 L 1165.0 244" marker-end="url(#arrow-dashed)"/>
+      <g class="edge-label" transform="translate(1175.0,332.0)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">historical only</text></g>
+    </g><g class="edge variant-emphasis" data-id="workspace-scorer" data-from="workspace" data-to="scorer">
+      <path d="M 1320 748.0 L 1410 748.0" marker-end="url(#arrow-emphasis)"/>
+      <g class="edge-label" transform="translate(1365.0,738.0)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">terminal report + manifest</text></g>
+    </g><g class="edge variant-security" data-id="rcb-scorer" data-from="rcb" data-to="scorer">
+      <path d="M 145.0 494 L 145 900 L 1360 900 L 1360 748 L 1410 748.0" marker-end="url(#arrow-security)"/>
+      <g class="edge-label" transform="translate(752.5,890.0)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">hidden target / checklist</text></g>
+    </g><g class="edge variant-dashed" data-id="scorer-model" data-from="scorer" data-to="model_apis">
+      <path d="M 1690 748.0 L 1745 748 L 1745 62 L 1670 62 L 1670 62.0" marker-end="url(#arrow-dashed)"/>
+      <g class="edge-label" transform="translate(1755.0,405.0)"><rect x="-92" y="-13" width="184" height="24" rx="9"/><text text-anchor="middle" y="4">judge request</text></g>
+    </g></g>
+    <g class="nodes"><g class="node type-external" data-id="rcb" data-label="ResearchClawBench" data-sources="README.md::Benchmark integrity||docs/architecture.md::Benchmark boundary" tabindex="0" role="button" aria-label="ResearchClawBench">
+      <rect x="40" y="410" width="210" height="84" rx="16" ry="16"/>
+      <circle class="node-dot" cx="60" cy="432" r="6"/>
+      <text class="node-label" x="76" y="437">ResearchClawBench</text>
+      <text class="node-sub" x="60" y="461">task + data + related_work</text>
+      <text class="node-tag" x="60" y="478">target_study 隔离</text>
+    </g><g class="node type-backend" data-id="native" data-label="N0 Native Scheduler" data-sources="README.md::N0 semantics||docs/architecture.md::Condition boundary" tabindex="0" role="button" aria-label="N0 Native Scheduler">
+      <rect x="360" y="160" width="230" height="90" rx="16" ry="16"/>
+      <circle class="node-dot" cx="380" cy="182" r="6"/>
+      <text class="node-label" x="396" y="187">N0 Native Scheduler</text>
+      <text class="node-sub" x="380" y="211">host-owned top-level lifecycle</text>
+      <text class="node-tag" x="380" y="234">绕过 RAC runner</text>
+    </g><g class="node type-backend" data-id="runner" data-label="R1–R5 Episode Runner" data-sources="src/rac_ai_scientist/runner.py::EpisodeRunner" tabindex="0" role="button" aria-label="R1–R5 Episode Runner">
+      <rect x="360" y="420" width="230" height="96" rx="16" ry="16"/>
+      <circle class="node-dot" cx="380" cy="442" r="6"/>
+      <text class="node-label" x="396" y="447">R1–R5 Episode Runner</text>
+      <text class="node-sub" x="380" y="471">checkpoint → decide → invoke → evaluate</text>
+      <text class="node-tag" x="380" y="500">budget / hop / transaction</text>
+    </g><g class="node type-security" data-id="policy" data-label="Shared N0–R5 Policy" data-sources="src/rac_ai_scientist/conditions.py::Condition thresholds||src/rac_ai_scientist/policy.py::SharedPolicy" tabindex="0" role="button" aria-label="Shared N0–R5 Policy">
+      <rect x="690" y="420" width="260" height="96" rx="16" ry="16"/>
+      <circle class="node-dot" cx="710" cy="442" r="6"/>
+      <text class="node-label" x="726" y="447">Shared N0–R5 Policy</text>
+      <text class="node-sub" x="710" y="471">host-neutral coordination control plane</text>
+      <text class="node-tag" x="710" y="500">R2 route · R3 contract</text>
+    </g><g class="node type-messagebus" data-id="sharednet" data-label="SharedNet Room" data-sources="src/rac_ai_scientist/sharednet.py::Room transport||README.md::Active host communication" tabindex="0" role="button" aria-label="SharedNet Room">
+      <rect x="1390" y="160" width="280" height="84" rx="16" ry="16"/>
+      <circle class="node-dot" cx="1410" cy="182" r="6"/>
+      <text class="node-label" x="1426" y="187">SharedNet Room</text>
+      <text class="node-sub" x="1410" y="211">runtime communication plane</text>
+      <text class="node-tag" x="1410" y="228">五个 active host · R1–R5</text>
+    </g><g class="node type-security" data-id="verifier" data-label="Verifier + Recovery" data-sources="src/rac_ai_scientist/policy.py::verify_result||src/rac_ai_scientist/artifacts.py::WorkspaceTransaction" tabindex="0" role="button" aria-label="Verifier + Recovery">
+      <rect x="690" y="700" width="260" height="96" rx="16" ry="16"/>
+      <circle class="node-dot" cx="710" cy="722" r="6"/>
+      <text class="node-label" x="726" y="727">Verifier + Recovery</text>
+      <text class="node-sub" x="710" y="751">artifact diff · evidence checks · rollback/preserve</text>
+      <text class="node-tag" x="710" y="780">R4 verify · R5 recover</text>
+    </g><g class="node type-backend" data-id="bridge" data-label="HostBridge Protocol" data-sources="src/rac_ai_scientist/bridge.py::HostBridge||docs/architecture.md::Bridge boundary" tabindex="0" role="button" aria-label="HostBridge Protocol">
+      <rect x="1040" y="420" width="250" height="96" rx="16" ry="16"/>
+      <circle class="node-dot" cx="1060" cy="442" r="6"/>
+      <text class="node-label" x="1076" y="447">HostBridge Protocol</text>
+      <text class="node-sub" x="1060" y="471">normalize state · expose capability · invoke</text>
+      <text class="node-tag" x="1060" y="500">translation, not policy</text>
+    </g><g class="node type-cloud" data-id="active_hosts" data-label="5 Active AI Scientist Hosts" data-sources="README.md::Active matrix||configs/hosts/ark.json::Example capability cards||compose.yaml::Isolated services" tabindex="0" role="button" aria-label="5 Active AI Scientist Hosts">
+      <rect x="1390" y="360" width="330" height="190" rx="16" ry="16"/>
+      <circle class="node-dot" cx="1410" cy="382" r="6"/>
+      <text class="node-label" x="1426" y="387">5 Active AI Scientist Hosts</text>
+      <text class="node-sub" x="1410" y="411">ARK · Agent Laboratory · AI-Researcher · EvoScientist · AutoResearchClaw</text>
+      <text class="node-tag" x="1410" y="534">独立 Docker / Python stack</text>
+    </g><g class="node type-external" data-id="historical_dtp" data-label="data-to-paper" data-sources="README.md::Historical status||configs/hosts/data_to_paper.json::Retained bridge config" tabindex="0" role="button" aria-label="data-to-paper">
+      <rect x="1040" y="160" width="250" height="84" rx="16" ry="16"/>
+      <circle class="node-dot" cx="1060" cy="182" r="6"/>
+      <text class="node-label" x="1076" y="187">data-to-paper</text>
+      <text class="node-sub" x="1060" y="211">historical reproducibility bridge</text>
+      <text class="node-tag" x="1060" y="228">excluded from new active matrix</text>
+    </g><g class="node type-external" data-id="model_apis" data-label="External Model APIs" data-sources="compose.yaml::Agent/Judge env" tabindex="0" role="button" aria-label="External Model APIs">
+      <rect x="1390" y="20" width="280" height="84" rx="16" ry="16"/>
+      <circle class="node-dot" cx="1410" cy="42" r="6"/>
+      <text class="node-label" x="1426" y="47">External Model APIs</text>
+      <text class="node-sub" x="1410" y="71">Agent model + Judge model endpoints</text>
+      <text class="node-tag" x="1410" y="88">provider usage 计入预算/评分</text>
+    </g><g class="node type-database" data-id="workspace" data-label="Episode Workspace + Ledger" data-sources="README.md::Episode records||src/rac_ai_scientist/ledger.py::JsonlLedger" tabindex="0" role="button" aria-label="Episode Workspace + Ledger">
+      <rect x="1040" y="700" width="280" height="96" rx="16" ry="16"/>
+      <circle class="node-dot" cx="1060" cy="722" r="6"/>
+      <text class="node-label" x="1076" y="727">Episode Workspace + Ledger</text>
+      <text class="node-sub" x="1060" y="751">runs/ · JSON/JSONL · artifacts · usage · hashes</text>
+      <text class="node-tag" x="1060" y="780">append-only coordination trace</text>
+    </g><g class="node type-backend" data-id="scorer" data-label="Independent RCB Scorer" data-sources="README.md::Scoring flow||compose.yaml::Scorer service" tabindex="0" role="button" aria-label="Independent RCB Scorer">
+      <rect x="1410" y="700" width="280" height="96" rx="16" ry="16"/>
+      <circle class="node-dot" cx="1430" cy="722" r="6"/>
+      <text class="node-label" x="1446" y="727">Independent RCB Scorer</text>
+      <text class="node-sub" x="1430" y="751">terminal report + hidden checklist/target</text>
+      <text class="node-tag" x="1430" y="780">单独 scorer image</text>
+    </g></g>
+  </svg>
+  <aside id="drawer" class="drawer"><h2 id="drawerTitle"></h2><p id="drawerMeta">点击节点查看 revision-pinned repository evidence。</p><div id="drawerSources"></div></aside>
+</main>
+<footer class="cards"><section class="card card-cyan"><h3><span class="dot"></span>N0–R5 累积条件</h3><ul><li>N0：原生 fixed workflow</li><li>R1：+ SharedNet runtime communication（仍走原生 successor）</li><li>R2：+ runtime routing</li><li>R3：+ scoped work contracts</li><li>R4：+ artifact-grounded verification</li><li>R5：+ artifact-preserving recovery</li></ul></section><section class="card card-emerald"><h3><span class="dot"></span>当前实验矩阵</h3><ul><li>Active：ARK、Agent Laboratory、AI-Researcher、EvoScientist、AutoResearchClaw</li><li>Historical：data-to-paper bridge 保留用于复现实验，但退出新 active matrix</li><li>R1–R5 的五个 active host 均使用 fresh SharedNet Room</li></ul></section><section class="card card-rose"><h3><span class="dot"></span>可信评测边界</h3><ul><li>Host 只收到 task / data / related_work；永远看不到 target_study</li><li>Router / verifier 的调用与开销计入相同 lifecycle budget</li><li>失败与 budget-exhausted episode 保留在 denominator</li><li>Agent 自报完成不是证据；R4+ 只认 persisted effects</li></ul></section></footer>
+</div>
+<script>
+const root=document.documentElement;
+const nodes=[...document.querySelectorAll('.node')];
+const edges=[...document.querySelectorAll('.edge')];
+const drawer=document.getElementById('drawer');
+const title=document.getElementById('drawerTitle');
+const sources=document.getElementById('drawerSources');
+const repo="https://github.com/FORLEMON/RAC-AI_Scientist"; const rev="91fc6d1e4eee0d1ecb94874a0ac461fd7fa21785";
+function clearFocus(){nodes.forEach(n=>n.classList.remove('dimmed','focused'));edges.forEach(e=>e.classList.remove('dimmed','focused'));drawer.classList.remove('show');document.getElementById('search').value='';}
+function focusIds(ids){const set=new Set(ids);nodes.forEach(n=>n.classList.toggle('dimmed',!set.has(n.dataset.id)));edges.forEach(e=>e.classList.toggle('dimmed',!(set.has(e.dataset.from)&&set.has(e.dataset.to))));}
+function focusNode(id){nodes.forEach(n=>{const on=n.dataset.id===id;n.classList.toggle('focused',on);n.classList.toggle('dimmed',!on && !edges.some(e=>(e.dataset.from===id&&e.dataset.to===n.dataset.id)||(e.dataset.to===id&&e.dataset.from===n.dataset.id)));});edges.forEach(e=>{const on=e.dataset.from===id||e.dataset.to===id;e.classList.toggle('focused',on);e.classList.toggle('dimmed',!on);});const n=nodes.find(n=>n.dataset.id===id);title.textContent=n.dataset.label;sources.innerHTML='';const arr=(n.dataset.sources||'').split('||').filter(Boolean);arr.forEach(raw=>{const [path,label]=raw.split('::');const a=document.createElement('a');a.href=`${repo}/blob/${rev}/${path}`;a.target='_blank';a.rel='noreferrer';a.textContent=`↗ ${label} · ${path}`;sources.appendChild(a);});drawer.classList.add('show');}
+nodes.forEach(n=>{n.addEventListener('click',()=>focusNode(n.dataset.id));n.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ') focusNode(n.dataset.id)});});
+document.querySelectorAll('.view-btn').forEach(b=>b.addEventListener('click',()=>{clearFocus();focusIds(b.dataset.focus.split(','));}));
+document.getElementById('resetBtn').addEventListener('click',clearFocus);
+document.getElementById('themeBtn').addEventListener('click',()=>{root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';});
+const mq=window.matchMedia('(prefers-color-scheme: dark)'); root.dataset.theme=mq.matches?'dark':'light';
+document.getElementById('search').addEventListener('input',e=>{const q=e.target.value.trim().toLowerCase(); if(!q){clearFocus();return;} const hit=nodes.filter(n=>n.dataset.label.toLowerCase().includes(q)||n.dataset.id.toLowerCase().includes(q));focusIds(hit.map(n=>n.dataset.id));});
+</script>
+</body></html>
