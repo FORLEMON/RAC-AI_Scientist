@@ -1,3 +1,4 @@
+import json
 import sys
 import time
 import tempfile
@@ -14,6 +15,62 @@ from rac_ai_scientist.policy import SharedPolicy, verify_result
 
 
 class AutoResearchClawRuntimeTests(unittest.TestCase):
+    def test_related_work_pdfs_are_translated_into_native_literature_artifacts(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            related_work = directory / "related_work"
+            related_work.mkdir()
+            (related_work / "paper_000.pdf").write_bytes(b"fake pdf")
+            stage = directory / "auto_research_claw_native" / "stage-04"
+            stage.mkdir(parents=True)
+            candidates = stage / "candidates.jsonl"
+            candidates.write_text(
+                json.dumps({"id": "existing", "title": "Existing paper"}) + "\n",
+                encoding="utf-8",
+            )
+            manifest = Path(__file__).resolve().parents[1] / "configs/hosts/auto_research_claw.json"
+            bridge = AutoResearchClawBridge(
+                directory, manifest, Budget(10, 1000, 1000, 5, 100, 5), "fake", "FAKE-ONLY"
+            )
+            bridge.workspace = directory
+            bridge.run_dir = directory / "auto_research_claw_native"
+
+            class PDFExtractor:
+                def __init__(self, **kwargs):
+                    self.kwargs = kwargs
+
+                def extract(self, path):
+                    return types.SimpleNamespace(
+                        has_content=True,
+                        title="Provided black-hole paper",
+                        authors=["A. Researcher"],
+                        abstract="A benchmark-provided paper about black-hole superradiance.",
+                        text="Provided black-hole paper\nFull text",
+                    )
+
+            package = types.ModuleType("researchclaw")
+            package.__path__ = []
+            web = types.ModuleType("researchclaw.web")
+            web.__path__ = []
+            extractor = types.ModuleType("researchclaw.web.pdf_extractor")
+            extractor.PDFExtractor = PDFExtractor
+            with patch.dict(sys.modules, {
+                "researchclaw": package,
+                "researchclaw.web": web,
+                "researchclaw.web.pdf_extractor": extractor,
+            }):
+                self.assertEqual(bridge._seed_related_work_candidates(), 1)
+                self.assertEqual(bridge._seed_related_work_candidates(), 0)
+
+            rows = [json.loads(line) for line in candidates.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[1]["source"], "provided_related_work")
+            self.assertEqual(rows[1]["url"], "related_work/paper_000.pdf")
+            self.assertEqual(rows[1]["cite_key"], "provided_paper_000")
+            references = (stage / "references.bib").read_text(encoding="utf-8")
+            self.assertEqual(references.count("@misc{provided_paper_000,"), 1)
+            self.assertNotIn(str(directory), candidates.read_text(encoding="utf-8"))
+
     def test_native_research_decisions_route_and_bound_rollbacks(self):
         class Stage(IntEnum):
             SYNTHESIS = 7

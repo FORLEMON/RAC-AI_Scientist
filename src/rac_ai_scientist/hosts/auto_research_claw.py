@@ -209,6 +209,67 @@ class AutoResearchClawBridge(HostBridge):
     def native_next(self, checkpoint: Checkpoint) -> str | None:
         return None if self.terminal else self._next_native()
 
+    def _seed_related_work_candidates(self) -> int:
+        assert self.workspace is not None and self.run_dir is not None
+        related_work = self.workspace / "related_work"
+        candidates_path = self.run_dir / "stage-04" / "candidates.jsonl"
+        if not related_work.is_dir() or not candidates_path.is_file():
+            return 0
+
+        existing_ids = {
+            row.get("id")
+            for line in candidates_path.read_text(encoding="utf-8").splitlines()
+            if isinstance(row := json.loads(line), dict)
+        }
+        from researchclaw.web.pdf_extractor import PDFExtractor
+
+        extractor = PDFExtractor(max_pages=3, extract_sections=False)
+        candidates: list[dict[str, Any]] = []
+        bibliography: list[str] = []
+        for path in sorted(related_work.glob("*.pdf")):
+            candidate_id = f"provided-related-work-{path.stem}"
+            if candidate_id in existing_ids:
+                continue
+            content = extractor.extract(path)
+            if not content.has_content:
+                continue
+            text = content.text.strip()
+            title = content.title.strip() or next(
+                (line.strip() for line in text.splitlines() if line.strip()), path.stem
+            )
+            authors = [str(author).strip() for author in content.authors if str(author).strip()]
+            cite_key = "provided_" + "".join(
+                character if character.isalnum() else "_" for character in path.stem
+            )
+            candidates.append({
+                "id": candidate_id,
+                "title": title,
+                "source": "provided_related_work",
+                "url": f"related_work/{path.name}",
+                "abstract": content.abstract.strip() or text[:2000],
+                "authors": [{"name": author} for author in authors],
+                "cite_key": cite_key,
+            })
+            bib_title = title.replace("{", "(").replace("}", ")").replace("\n", " ")
+            bib_authors = " and ".join(authors).replace("{", "(").replace("}", ")") or "Unknown"
+            bibliography.append(
+                f"@misc{{{cite_key},\n"
+                f"  title={{{bib_title}}},\n"
+                f"  author={{{bib_authors}}},\n"
+                "  note={Benchmark-provided related work},\n"
+                "}"
+            )
+
+        if not candidates:
+            return 0
+        with candidates_path.open("a", encoding="utf-8") as handle:
+            for candidate in candidates:
+                handle.write(json.dumps(candidate, ensure_ascii=False) + "\n")
+        references = candidates_path.with_name("references.bib")
+        with references.open("a", encoding="utf-8") as handle:
+            handle.write("\n".join(bibliography) + "\n")
+        return len(candidates)
+
     def invoke(self, capability_id: str, contract: WorkContract | None) -> InvocationResult:
         self._require_initialized()
         if capability_id not in {c.capability_id for c in self._available_cards() if c.available}:
@@ -229,16 +290,21 @@ class AutoResearchClawBridge(HostBridge):
             if self.rollback_stage is not None and first <= self.rollback_stage <= last:
                 first = self.rollback_stage
             results = []
+            seeded_related_work = 0
             for stage_number in range(first, last + 1):
                 result = execute_stage(Stage(stage_number), run_dir=self.run_dir,
                     run_id=self.episode_id, config=self.config, adapters=self.adapters,
                     auto_approve_gates=True)
                 results.append(result)
+                if stage_number == 4 and result.status == StageStatus.DONE:
+                    seeded_related_work = self._seed_related_work_candidates()
                 if result.status != StageStatus.DONE:
                     detail = f": {result.error}" if result.error else ""
                     error = f"native stage {result.stage.name} {result.status.value}{detail}"
                     break
             output = "\n".join(f"{r.stage.name}: {r.status.value}{': ' + r.error if r.error else ''}" for r in results)
+            if seeded_related_work:
+                output += f"\nSeeded {seeded_related_work} benchmark-provided related-work papers"
             self._normalize_products()
             if results and all(r.status.value == "done" for r in results):
                 self.completed.add(capability_id)
