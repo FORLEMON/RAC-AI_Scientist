@@ -45,8 +45,9 @@
       "local_snapshot": "AI-Researcher-main",
       "tree_sha256": "a952224ea0e3216f9c6cff1c30444afef04a9d8bb0bbb206c60df2125c8ec0c6",
       "snapshot_tree_sha256": "48de1aef80d0fe39fe1148441e992d3b22a20f49678801d62ca005990129c528",
+      "runtime_tree_sha256": "3b46c70382861063ed207bb8172df2a3ef8920be3cb69f81314626fce5284aef",
       "license": "MIT",
-      "note": "The Windows archive snapshot normalizes ':' to '_' and omits seven '?' filenames; all 1,457 present files match the revision. Fresh bootstraps retain the canonical 1,464-file Git tree."
+      "note": "The Windows archive snapshot normalizes ':' to '_' and omits seven '?' filenames; all 1,457 present files match the revision. Fresh bootstraps retain the canonical 1,464-file Git tree. The approved packaged runtime uses native commit 6ba5d804e5879cc9e0f9d799c766e423974b3f8d (EOF, PDF text boundary, and terminal source identity); runtime_tree_sha256 covers its clean Git archive. The official revision/tree and Windows snapshot pins remain unchanged."
     },
     "evo_scientist": {
       "url": "https://github.com/EvoScientist/EvoScientist.git",
