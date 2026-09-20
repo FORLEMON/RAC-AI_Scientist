@@ -485,7 +485,10 @@ class AgentLaboratoryBridge(HostBridge):
             }
             if temp is not None:
                 request["temperature"] = temp
-            request["max_tokens"] = max(1, self.initial_budget.output_tokens - self.output_tokens)
+            request["max_tokens"] = min(
+                1024 if "Phase: literature review" in prompt else 16384,
+                max(1, self.initial_budget.output_tokens - self.output_tokens),
+            )
             response = client.chat.completions.create(**request)
             self.provider_calls += 1
             usage = getattr(response, "usage", None)

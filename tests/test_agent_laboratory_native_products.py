@@ -1,9 +1,12 @@
 import json
 import os
+import sys
 import tempfile
+import time
 import types
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from rac_ai_scientist.cli import _run_one, build_parser
@@ -47,6 +50,47 @@ def bridge_for(workspace, error=None):
 
 
 class AgentLaboratoryNativeProductsTests(unittest.TestCase):
+    def test_literature_review_requests_short_outputs(self):
+        calls = []
+
+        class Completions:
+            def create(self, **kwargs):
+                calls.append(kwargs)
+                return SimpleNamespace(
+                    usage=SimpleNamespace(prompt_tokens=10, completion_tokens=2),
+                    choices=[SimpleNamespace(message=SimpleNamespace(content="done")),],
+                )
+
+        openai = types.ModuleType("openai")
+        openai.OpenAI = lambda **_kwargs: SimpleNamespace(
+            chat=SimpleNamespace(completions=Completions())
+        )
+        native_modules = {
+            name: types.ModuleType(name)
+            for name in ("ai_lab_repo", "agents", "inference", "mlesolver", "papersolver")
+        }
+        for module in native_modules.values():
+            module.query_model = lambda **_kwargs: "unpatched"
+        manifest = Path(__file__).resolve().parents[1] / "configs/hosts/agent_laboratory.json"
+        bridge = AgentLaboratoryBridge(
+            Path.cwd(), manifest, Budget(70, 100_000_000, 1_800_000, 1_200, 43_200, 40),
+            "DeepSeek-V4-Flash-0731", "fake-only",
+        )
+        bridge.started = time.monotonic()
+
+        with patch.dict(sys.modules, {"openai": openai, **native_modules}):
+            bridge._install_model_adapter()
+            native_modules["agents"].query_model(
+                model_str="ignored", system_prompt="system",
+                prompt="Current Step #8, Phase: literature review",
+            )
+            native_modules["agents"].query_model(
+                model_str="ignored", system_prompt="system",
+                prompt="Current Step #1, Phase: running experiments",
+            )
+
+        self.assertEqual([call["max_tokens"] for call in calls], [1024, 16384])
+
     def test_native_failure_persists_products_and_preserves_exception(self):
         errors = (
             RuntimeError("arXiv API search failed after native retries"),
