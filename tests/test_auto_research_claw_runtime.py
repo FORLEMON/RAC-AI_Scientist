@@ -188,6 +188,12 @@ class AutoResearchClawRuntimeTests(unittest.TestCase):
     def test_codegen_parser_accepts_complete_raw_python(self):
         source = "from pathlib import Path\n\nPath('result.txt').write_text('ok')\n"
         self.assertEqual(_raw_python_codegen_fallback(source), {"main.py": source.strip()})
+        fragment = (
+            "# In superradiance.py - fix the growth rate calculation\n"
+            "def compute_growth_rate(self, mass):\n"
+            "    return mass\n"
+        )
+        self.assertEqual(_raw_python_codegen_fallback(fragment), {})
         self.assertEqual(_raw_python_codegen_fallback("Here is the requested program:"), {})
 
     def test_codegen_calls_receive_the_larger_output_floor(self):

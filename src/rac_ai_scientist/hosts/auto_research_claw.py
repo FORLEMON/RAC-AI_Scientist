@@ -63,8 +63,14 @@ def _benchmark_execution_topic(workspace: Path, objective: str) -> str:
 def _raw_python_codegen_fallback(text: str) -> dict[str, str]:
     candidate = text.strip()
     try:
-        ast.parse(candidate)
+        module = ast.parse(candidate)
     except (SyntaxError, ValueError, TypeError):
+        return {}
+    executable = (
+        ast.Expr, ast.If, ast.For, ast.AsyncFor, ast.While,
+        ast.Try, ast.With, ast.AsyncWith, ast.Match,
+    )
+    if not any(isinstance(node, executable) for node in module.body):
         return {}
     return {"main.py": candidate} if candidate else {}
 
