@@ -45,12 +45,14 @@ def _benchmark_execution_topic(workspace: Path, objective: str) -> str:
             continue
         path = item.get("path") or (f"data/{item['name']}" if item.get("name") else None)
         if path:
-            details.append(f"- {path}: {item.get('description', 'supplied benchmark input')}")
+            input_path = (workspace / path).resolve().as_posix()
+            details.append(f"- {input_path}: {item.get('description', 'supplied benchmark input')}")
     inputs = "\n".join(details) or "- Inspect the supplied data/ directory before designing the experiment."
     return (
         f"{objective.strip()}\n\n"
         "BENCHMARK EXECUTION CONTRACT (mandatory):\n"
         "Use only the files already present in this workspace; do not acquire or substitute an external dataset.\n"
+        "Use the absolute input paths below: experiment sandboxes run from a different working directory.\n"
         "Base every numerical claim on measurements from the supplied inputs.\n"
         "Persist executable code under code/, measured outputs under outputs/, and the final report at report/report.md.\n"
         "Available benchmark inputs:\n"
