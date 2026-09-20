@@ -500,7 +500,14 @@ class AgentLaboratoryBridge(HostBridge):
                 self.cost_is_provider_reported = False
             else:
                 self.provider_cost_usd += cost
-            return response.choices[0].message.content or ""
+            content = response.choices[0].message.content or ""
+            if (
+                "Phase: literature review" in prompt
+                and content.startswith(("```SUMMARY", "```FULL_TEXT", "```ADD_PAPER"))
+                and content.count("```") == 1
+            ):
+                content = content.rstrip() + "\n```"
+            return content
 
         for module in (inference, agents, mlesolver, papersolver, ai_lab_repo):
             if hasattr(module, "query_model"):

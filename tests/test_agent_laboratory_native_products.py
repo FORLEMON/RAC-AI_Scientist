@@ -56,9 +56,10 @@ class AgentLaboratoryNativeProductsTests(unittest.TestCase):
         class Completions:
             def create(self, **kwargs):
                 calls.append(kwargs)
+                content = "```SUMMARY\nfew-shot intrusion detection" if len(calls) == 1 else "done"
                 return SimpleNamespace(
                     usage=SimpleNamespace(prompt_tokens=10, completion_tokens=2),
-                    choices=[SimpleNamespace(message=SimpleNamespace(content="done")),],
+                    choices=[SimpleNamespace(message=SimpleNamespace(content=content)),],
                 )
 
         openai = types.ModuleType("openai")
@@ -80,7 +81,7 @@ class AgentLaboratoryNativeProductsTests(unittest.TestCase):
 
         with patch.dict(sys.modules, {"openai": openai, **native_modules}):
             bridge._install_model_adapter()
-            native_modules["agents"].query_model(
+            incomplete_command = native_modules["agents"].query_model(
                 model_str="ignored", system_prompt="system",
                 prompt="Current Step #8, Phase: literature review",
             )
@@ -90,6 +91,7 @@ class AgentLaboratoryNativeProductsTests(unittest.TestCase):
             )
 
         self.assertEqual([call["max_tokens"] for call in calls], [1024, 16384])
+        self.assertEqual(incomplete_command, "```SUMMARY\nfew-shot intrusion detection\n```")
 
     def test_native_failure_persists_products_and_preserves_exception(self):
         errors = (
