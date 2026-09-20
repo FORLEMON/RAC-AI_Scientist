@@ -12,7 +12,7 @@ from rac_ai_scientist.cli import _run_one
 
 
 # Previously recorded successful runtime and unchanged official source pins.
-RUNTIME = "c4def4550574dfc4eade06aed1dcdcd998ee86d603a18e5777f1cb85e58e4b64"
+RUNTIME = "01b369c6d0f5e6a43a1a2517b377fe0a0b24e09a5bb123358a67f08eaa9dbd0a"
 OFFICIAL = "e02d651fa3579b0fb878130deef5be6dff10cd40977e5df0fc6099e9b9326d6b"
 
 
@@ -52,7 +52,7 @@ class AutoRuntimePinTests(unittest.TestCase):
                         self.assertEqual(_run_one(args), 0)
                 metadata = json.loads((root / "runs/fake/episode.json").read_text())
                 self.assertEqual(metadata["upstream"]["expected_tree_sha256"], RUNTIME if packaged else OFFICIAL)
-        self.assertEqual(spec["revision"], "647022901b8778cb60da8489292b2187d3349398")
+        self.assertEqual(spec["revision"], "7c264656d895ed1f41acd662b9e6195858bf5e37")
         self.assertEqual(spec["url"], "https://github.com/JY0xLU/AutoResearchClaw.git")
 
 

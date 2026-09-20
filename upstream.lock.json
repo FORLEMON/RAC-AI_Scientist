@@ -60,13 +60,13 @@
     },
     "auto_research_claw": {
       "url": "https://github.com/JY0xLU/AutoResearchClaw.git",
-      "revision": "647022901b8778cb60da8489292b2187d3349398",
+      "revision": "7c264656d895ed1f41acd662b9e6195858bf5e37",
       "required_for_live": true,
       "version_observed": "0.5.0",
       "local_snapshot": "AutoResearchClaw-main",
       "tree_sha256": "e02d651fa3579b0fb878130deef5be6dff10cd40977e5df0fc6099e9b9326d6b",
-      "runtime_tree_sha256": "c4def4550574dfc4eade06aed1dcdcd998ee86d603a18e5777f1cb85e58e4b64",
-      "note": "Runtime uses the approved 6470229 fork with bounded native arXiv connect/read waits; runtime_tree_sha256 is computed from a clean `git -c core.autocrlf=false archive 6470229`; tree_sha256 retains the official be4ba4755bf1b52220f25e13b2293b5956590070 source tree.",
+      "runtime_tree_sha256": "01b369c6d0f5e6a43a1a2517b377fe0a0b24e09a5bb123358a67f08eaa9dbd0a",
+      "note": "Runtime uses the reviewed 7c264656d895ed1f41acd662b9e6195858bf5e37 native repair; runtime_tree_sha256 is computed from a clean `git -c core.autocrlf=false archive 7c264656d895ed1f41acd662b9e6195858bf5e37`; tree_sha256 retains the official be4ba4755bf1b52220f25e13b2293b5956590070 source tree.",
       "license": "MIT"
     },
     "researchclawbench": {

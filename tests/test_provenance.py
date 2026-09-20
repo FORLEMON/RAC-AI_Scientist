@@ -16,8 +16,8 @@ class ProvenanceTests(unittest.TestCase):
     def test_auto_runtime_pin_uses_clean_647_archive(self):
         lock = json.loads((Path(__file__).parents[1] / "upstream.lock.json").read_text(encoding="utf-8"))
         spec = lock["upstreams"]["auto_research_claw"]
-        self.assertEqual(spec["revision"], "647022901b8778cb60da8489292b2187d3349398")
-        self.assertEqual(spec["runtime_tree_sha256"], "c4def4550574dfc4eade06aed1dcdcd998ee86d603a18e5777f1cb85e58e4b64")
+        self.assertEqual(spec["revision"], "7c264656d895ed1f41acd662b9e6195858bf5e37")
+        self.assertEqual(spec["runtime_tree_sha256"], "01b369c6d0f5e6a43a1a2517b377fe0a0b24e09a5bb123358a67f08eaa9dbd0a")
 
     def test_tree_hash_depends_on_paths_and_contents(self):
         with tempfile.TemporaryDirectory() as raw:
