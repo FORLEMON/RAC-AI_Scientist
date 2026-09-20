@@ -7,11 +7,74 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from rac_ai_scientist.hosts.ai_researcher import AIResearcherBridge
+from rac_ai_scientist.hosts.ark import render_contract_prompt
 from rac_ai_scientist.manifest import capability_cards, load_host_manifest
 from rac_ai_scientist.schemas import Budget, Usage
 
 
 class ToolArgumentTests(unittest.TestCase):
+    def test_planning_prompt_clarifies_reference_availability_without_changing_controls(self):
+        resource_contract = (
+            "Reference-code availability: this benchmark bridge does not run the native Prepare Agent "
+            "or supply a prepared reference repository. Review any reference implementation actually "
+            "present in the workspace. If none is present, state that absence and plan a new implementation "
+            "from the objective, model survey, and supplied datasets; do not invent implementation references. "
+            "Record the plan with plan_dataset, plan_training, and plan_testing, then use case_resolved."
+        )
+        for has_code in (False, True):
+            with self.subTest(has_code=has_code), tempfile.TemporaryDirectory() as directory:
+                bridge = self.phase_bridge(Path(directory))
+                bridge.context['model_survey'] = 'Reference implementation available' if has_code else 'No reference codebases exist'
+                code = bridge.workspace / 'code/reference.py'
+                code.parent.mkdir()
+                if has_code:
+                    code.write_text('print("existing implementation")')
+                original_budget, original_agents = bridge.initial_budget, dict(bridge.agents)
+                bridge.client.run_async = AsyncMock(return_value=SimpleNamespace(context_variables={}, messages=[
+                    {'role': 'tool', 'name': 'case_resolved', 'content': '# Implementation plan'}]))
+                self.assertIsNone(bridge.invoke('implementation_plan', None).error)
+                call = bridge.client.run_async.call_args
+                prompt = call.args[1][0]['content']
+                self.assertEqual(prompt.count(resource_contract), 1)
+                self.assertIn(bridge.context['model_survey'], prompt)
+                self.assertEqual(call.args[0], original_agents['implementation_plan'])
+                self.assertEqual(set(call.kwargs), {'context_variables', 'model_override', 'debug'})
+                self.assertIs(call.kwargs['context_variables'], bridge.context)
+                self.assertEqual(call.kwargs['model_override'], 'fake')
+                self.assertIs(bridge.initial_budget, original_budget)
+                self.assertEqual(bridge.agents, original_agents)
+                if has_code:
+                    self.assertEqual(code.read_text(), 'print("existing implementation")')
+                else:
+                    self.assertFalse(code.exists())
+
+    def test_other_phase_prompts_remain_unchanged(self):
+        for capability in ('idea', 'survey', 'implementation', 'experiment_analysis', 'paper_writing', 'review'):
+            with self.subTest(capability=capability), tempfile.TemporaryDirectory() as directory:
+                bridge = self.phase_bridge(Path(directory))
+                bridge.agents[capability] = capability
+                bridge.context['model_survey'] = 'Survey fixture'
+                (bridge.workspace / 'state/ai_researcher/implementation_plan.md').write_text('Plan fixture')
+                (bridge.workspace / 'report').mkdir()
+                (bridge.workspace / 'report/report.md').write_text('Report fixture')
+                message = ({'role': 'assistant', 'content': 'Score: 5/10'} if capability in {'idea', 'paper_writing', 'review'}
+                           else {'role': 'tool', 'name': 'case_resolved', 'content': 'Phase fixture'})
+                bridge.client.run_async = AsyncMock(return_value=SimpleNamespace(
+                    context_variables={'notes': [{'definition': 'fixture'}]}, messages=[message]))
+                expected = render_contract_prompt(bridge.objective, capability, None)
+                expected += f'\nWorkspace: {bridge.workspace.as_posix()}\nSupplied research papers are in related_work/; supplied datasets are in data/.'
+                if capability == 'survey':
+                    expected += '\nResearch proposal:\nResearch proposal\nReference papers:\n'
+                    expected += '\nSurvey these references through the Paper Survey and Code Survey agents before resolving the survey. Record actual findings in notes; if reference code is absent, state that explicitly.'
+                elif capability == 'implementation':
+                    expected += '\nSupplied datasets:\n\nImplementation plan:\nPlan fixture'
+                elif capability == 'paper_writing':
+                    expected += '\nRead persisted plans, code, and outputs, then return the complete Markdown report.'
+                elif capability == 'review':
+                    expected += '\nReport to review:\nReport fixture'
+                self.assertIsNone(bridge.invoke(capability, None).error)
+                self.assertEqual(bridge.client.run_async.call_args.args[1][0]['content'], expected)
+
     def test_planner_is_unavailable_before_survey_handoff(self):
         bridge = object.__new__(AIResearcherBridge)
         bridge.completed = {'idea'}

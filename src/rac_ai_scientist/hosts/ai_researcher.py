@@ -247,6 +247,13 @@ class AIResearcherBridge(HostBridge):
             elif capability_id in {"implementation_plan", "implementation"}:
                 if capability_id == "implementation_plan":
                     prompt += "\nModel survey:\n" + self.context["model_survey"]
+                    prompt += (
+                        "\nReference-code availability: this benchmark bridge does not run the native Prepare Agent "
+                        "or supply a prepared reference repository. Review any reference implementation actually "
+                        "present in the workspace. If none is present, state that absence and plan a new implementation "
+                        "from the objective, model survey, and supplied datasets; do not invent implementation references. "
+                        "Record the plan with plan_dataset, plan_training, and plan_testing, then use case_resolved."
+                    )
                 prompt += "\nSupplied datasets:\n" + "\n".join(
                     path.as_posix() for path in sorted((self.workspace / "data").rglob("*")) if path.is_file())
                 if capability_id == "implementation":
