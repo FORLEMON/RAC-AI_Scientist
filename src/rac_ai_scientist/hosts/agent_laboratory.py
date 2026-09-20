@@ -39,6 +39,28 @@ REQUIRED_TAGS = {
     "report_refinement": ("terminal_review",),
 }
 
+# The lifecycle output budget is cumulative across the entire episode.  It must
+# not be sent verbatim as one request's ``max_tokens``: a generous lifecycle
+# budget can be larger than the provider's context window and get rejected
+# before inference starts.  Keep a conservative per-request ceiling while still
+# allowing many calls to consume the full lifecycle allowance over time.
+MAX_COMPLETION_TOKENS_PER_REQUEST = 65_536
+
+
+def _request_completion_limit(remaining_output_tokens: int) -> int:
+    """Return a context-safe per-request limit from the cumulative remainder."""
+    if remaining_output_tokens <= 0:
+        raise RuntimeError("lifecycle output-token budget exhausted")
+    return min(remaining_output_tokens, MAX_COMPLETION_TOKENS_PER_REQUEST)
+
+
+def _is_terminal_provider_error(exc: Exception) -> bool:
+    """Identify deterministic request/configuration failures that cannot retry."""
+    status_code = getattr(exc, "status_code", None)
+    if status_code is None:
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    return type(exc).__name__ == "BadRequestError" or status_code in {400, 401, 403, 404, 422}
+
 
 class _ArxivTimedSession:
     def __init__(self, inner):
@@ -389,6 +411,7 @@ class AgentLaboratoryBridge(HostBridge):
         cost_before = self.provider_cost_usd
         output = io.StringIO()
         error = None
+        terminal_error = False
         started = time.monotonic()
         previous = Path.cwd()
         proposed_done = False
@@ -423,6 +446,7 @@ class AgentLaboratoryBridge(HostBridge):
             self._normalize_report()
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
+            terminal_error = _is_terminal_provider_error(exc)
         finally:
             os.chdir(previous)
             self.hop += 1
@@ -444,6 +468,7 @@ class AgentLaboratoryBridge(HostBridge):
             ),
             error=error,
             proposed_done=proposed_done,
+            terminal_error=terminal_error,
         )
 
     def _available_cards(self):
@@ -540,7 +565,9 @@ class AgentLaboratoryBridge(HostBridge):
             }
             if temp is not None:
                 request["temperature"] = temp
-            request["max_tokens"] = max(1, self.initial_budget.output_tokens - self.output_tokens)
+            request["max_tokens"] = _request_completion_limit(
+                self.initial_budget.output_tokens - self.output_tokens
+            )
             response = client.chat.completions.create(**request)
             self.provider_calls += 1
             usage = getattr(response, "usage", None)
