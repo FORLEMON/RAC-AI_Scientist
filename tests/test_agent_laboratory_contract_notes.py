@@ -18,6 +18,8 @@ class AgentLaboratoryContractNotesTests(unittest.TestCase):
         note = bridge._benchmark_note()
 
         self.assertIn("workspace-relative paths", note)
+        self.assertIn("Plan formulation cannot execute shell commands", note)
+        self.assertIn("return PLAN", note)
 
     def test_native_agents_receive_current_contract_without_accumulating_retry_notes(self):
         class FakeWorkflow:

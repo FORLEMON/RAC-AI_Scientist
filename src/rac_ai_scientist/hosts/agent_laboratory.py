@@ -379,6 +379,8 @@ class AgentLaboratoryBridge(HostBridge):
             f"Work only inside {self.workspace}. Use the supplied data/ and related_work/. "
             "When related_work contains PDFs, use those supplied papers before any external literature search; "
             "external arXiv research is only a fallback when no local PDF is supplied. "
+            "Plan formulation cannot execute shell commands: do not emit RUN_SHELL; use task.json and the "
+            "declared data paths, then return PLAN. Inspect data later during data preparation. "
             "The hidden target study is unavailable and must not be sought. Persist code under code/, "
             "results under outputs/, and the final ResearchClawBench report at report/report.md. "
             "Saved code must use workspace-relative paths; never embed the episode path."
