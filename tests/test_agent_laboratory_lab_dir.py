@@ -18,6 +18,7 @@ class AgentLaboratoryLabDirTests(unittest.TestCase):
 
             def __init__(self, **kwargs):
                 type(self).received_lab_dir = kwargs["lab_dir"]
+                self.phd = types.SimpleNamespace(max_hist_len=15)
                 native_path = Path(f"./{kwargs['lab_dir']}/src") / "probe.py"
                 native_path.write_text("saved by pinned native path", encoding="utf-8")
 
@@ -52,6 +53,7 @@ class AgentLaboratoryLabDirTests(unittest.TestCase):
                 bridge.initialize_native(episode_id="probe", workspace=workspace, objective="test topic", seed=0)
 
             self.assertEqual(FakeWorkflow.received_lab_dir, "agent_laboratory")
+            self.assertEqual(bridge.workflow.phd.max_hist_len, 10)
             self.assertEqual((workspace / "agent_laboratory" / "src" / "probe.py").read_text(encoding="utf-8"),
                              "saved by pinned native path")
 

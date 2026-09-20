@@ -228,6 +228,7 @@ class AgentLaboratoryBridge(HostBridge):
                 lab_index=0,
                 agentRxiv=False,
             )
+            self.workflow.phd.max_hist_len = 10
             self._save()
         finally:
             os.chdir(previous)
