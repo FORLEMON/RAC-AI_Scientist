@@ -13,6 +13,45 @@ from rac_ai_scientist.schemas import Budget, Usage
 
 
 class ToolArgumentTests(unittest.TestCase):
+    def test_planning_data_inspection_contract_keeps_inputs_and_product_gate(self):
+        data_contract = (
+            "Dataset inspection for planning: inspect the supplied metadata together with the actual file "
+            "header/structure and a small preview of real records to determine the format, fields, units, "
+            "and loading requirements. Additional inspection should resolve a specific uncertainty about "
+            "these requirements; tabular or numeric records are data, not implementation code requiring "
+            "exhaustive page-by-page review. Record full-dataset statistics and data-quality validation as "
+            "executable steps in the implementation/testing plan, not as conclusions established by a preview. "
+            "Once the loading and validation approach is defined, use plan_dataset, plan_training, and "
+            "plan_testing, then case_resolved."
+        )
+        for resolved in (False, True):
+            with self.subTest(resolved=resolved), tempfile.TemporaryDirectory() as directory:
+                bridge = self.phase_bridge(Path(directory))
+                bridge.context['model_survey'] = 'Survey fixture'
+                data = bridge.workspace / 'data/measurements.csv'
+                data.parent.mkdir()
+                original = b'value,uncertainty\n' + b'1.0,0.1\n' * 5000
+                data.write_bytes(original)
+                budget, agents = bridge.initial_budget, dict(bridge.agents)
+                message = ({'role': 'tool', 'name': 'case_resolved', 'content': '# Native plan'} if resolved
+                           else {'role': 'assistant', 'content': 'Still inspecting data'})
+                bridge.client.run_async = AsyncMock(return_value=SimpleNamespace(context_variables={}, messages=[message]))
+                result = bridge.invoke('implementation_plan', None)
+                call = bridge.client.run_async.call_args
+                prompt = call.args[1][0]['content']
+                self.assertEqual(prompt.count(data_contract), 1)
+                self.assertLess(prompt.index('Reference-code availability:'), prompt.index(data_contract))
+                self.assertIn(data.as_posix(), prompt)
+                self.assertNotIn(original.decode(), prompt)
+                self.assertEqual(data.read_bytes(), original)
+                self.assertIs(bridge.initial_budget, budget)
+                self.assertEqual(bridge.agents, agents)
+                self.assertEqual(call.kwargs['model_override'], 'fake')
+                self.assertEqual(set(call.kwargs), {'context_variables', 'model_override', 'debug'})
+                self.assertEqual(result.error is None, resolved)
+                self.assertEqual('implementation_plan' in bridge.completed, resolved)
+                self.assertEqual((bridge.workspace / 'state/ai_researcher/implementation_plan.md').exists(), resolved)
+
     def test_planning_prompt_clarifies_reference_availability_without_changing_controls(self):
         resource_contract = (
             "Reference-code availability: this benchmark bridge does not run the native Prepare Agent "

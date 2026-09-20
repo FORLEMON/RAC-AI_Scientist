@@ -254,6 +254,16 @@ class AIResearcherBridge(HostBridge):
                         "from the objective, model survey, and supplied datasets; do not invent implementation references. "
                         "Record the plan with plan_dataset, plan_training, and plan_testing, then use case_resolved."
                     )
+                    prompt += (
+                        "\nDataset inspection for planning: inspect the supplied metadata together with the actual file "
+                        "header/structure and a small preview of real records to determine the format, fields, units, "
+                        "and loading requirements. Additional inspection should resolve a specific uncertainty about "
+                        "these requirements; tabular or numeric records are data, not implementation code requiring "
+                        "exhaustive page-by-page review. Record full-dataset statistics and data-quality validation as "
+                        "executable steps in the implementation/testing plan, not as conclusions established by a preview. "
+                        "Once the loading and validation approach is defined, use plan_dataset, plan_training, and "
+                        "plan_testing, then case_resolved."
+                    )
                 prompt += "\nSupplied datasets:\n" + "\n".join(
                     path.as_posix() for path in sorted((self.workspace / "data").rglob("*")) if path.is_file())
                 if capability_id == "implementation":
