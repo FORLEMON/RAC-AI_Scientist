@@ -145,6 +145,78 @@ class ArkResearcherSpecializationTests(unittest.TestCase):
                 reviewer.read_text(encoding="utf-8"),
             )
 
+    def test_knowledge_filename_is_restored_without_another_researcher_hop(self):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            orchestrator = DiskResearchCompiler(
+                workspace,
+                section_filename="{role}_knowledge.md",
+            )
+            bridge = self.bridge(workspace, orchestrator)
+
+            bridge._run_native_research_specialization()
+
+            self.assertEqual(orchestrator.phase_calls, 1)
+            self.assertEqual(orchestrator.specialize_calls, 0)
+            self.assertTrue(bridge._research_prompts_specialized())
+            experimenter = workspace / ".rac/ark_project/agents/experimenter.prompt"
+            self.assertIn(
+                "Measured domain guidance",
+                experimenter.read_text(encoding="utf-8"),
+            )
+
+    def test_role_labelled_project_context_sections_are_restored(self):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            orchestrator = DiskResearchCompiler(workspace)
+
+            def write_context_sections():
+                state = workspace / "auto_research" / "state"
+                state.mkdir(parents=True, exist_ok=True)
+                blocks = ["# Project Context", "Verified project facts."]
+                for role in DOWNSTREAM:
+                    blocks.extend(
+                        (
+                            f"### For the {role.title()} Agent",
+                            "## Project-Specific Knowledge",
+                            f"{role} context-only guidance.",
+                        )
+                    )
+                (state / "project_context.md").write_text(
+                    "\n\n".join(blocks),
+                    encoding="utf-8",
+                )
+                agents = workspace / ".rac" / "ark_project" / "agents"
+                agents.mkdir(parents=True, exist_ok=True)
+                for role in DOWNSTREAM:
+                    (agents / f"{role}.prompt").write_text(
+                        f"base {role}\n",
+                        encoding="utf-8",
+                    )
+
+            orchestrator._run_research_phase = write_context_sections
+            bridge = self.bridge(workspace, orchestrator)
+
+            bridge._run_native_research_specialization()
+
+            self.assertEqual(orchestrator.specialize_calls, 0)
+            for role in DOWNSTREAM:
+                prompt = workspace / ".rac/ark_project/agents" / f"{role}.prompt"
+                text = prompt.read_text(encoding="utf-8")
+                self.assertEqual(text.count("## Project-Specific Knowledge"), 1)
+                self.assertIn(f"{role} context-only guidance.", text)
+
+    def test_unlabelled_context_section_is_not_assigned_to_a_role(self):
+        text = (
+            "# Project Context\n\n"
+            "The planner is mentioned in prose.\n\n"
+            "## Project-Specific Knowledge\nGeneric context only."
+        )
+        self.assertEqual(
+            ArkBridge._research_specialization_from_context(text, "planner"),
+            "",
+        )
+
     def test_saved_sections_never_replace_missing_base_prompts(self):
         with tempfile.TemporaryDirectory() as raw:
             workspace = Path(raw)
