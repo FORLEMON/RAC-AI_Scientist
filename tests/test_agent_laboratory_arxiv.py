@@ -1,3 +1,4 @@
+import pickle
 import sys
 import tempfile
 import types
@@ -5,7 +6,19 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from rac_ai_scientist.hosts.agent_laboratory import _install_arxiv_transport
+from rac_ai_scientist.hosts.agent_laboratory import (
+    _install_arxiv_transport,
+    _install_researchclawbench_literature_guard,
+)
+
+
+def mark_researchclawbench(workspace: Path) -> None:
+    marker = workspace / ".rac" / "benchmark.json"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
+        '{"schema_version": 1, "benchmark": "researchclawbench"}',
+        encoding="utf-8",
+    )
 
 
 class FakeSession:
@@ -35,6 +48,14 @@ class FakeArxivSearch:
     def retrieve_full_paper_text(self, query, MAX_LEN=50000):
         self.full_text_requests.append(query)
         return "remote paper"
+
+
+class GuardPhD:
+    def __init__(self):
+        self.lit_review = []
+
+    def inference(self, *args, **kwargs):
+        return "```SUMMARY\nkeep searching forever\n```"
 
 
 class AgentLaboratoryArxivTests(unittest.TestCase):
@@ -84,6 +105,7 @@ class AgentLaboratoryArxivTests(unittest.TestCase):
         pypdf.PdfReader = Reader
         with tempfile.TemporaryDirectory() as raw:
             workspace = Path(raw)
+            mark_researchclawbench(workspace)
             related = workspace / "related_work"
             related.mkdir()
             (related / "paper_000.pdf").write_bytes(b"placeholder")
@@ -122,6 +144,7 @@ class AgentLaboratoryArxivTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as raw:
             workspace = Path(raw)
+            mark_researchclawbench(workspace)
             related = workspace / "related_work"
             related.mkdir()
             (related / "paper_001.pdf").write_bytes(b"placeholder")
@@ -165,6 +188,7 @@ class AgentLaboratoryArxivTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as raw:
             workspace = Path(raw)
+            mark_researchclawbench(workspace)
             related = workspace / "related_work"
             related.mkdir()
             (related / "paper_000.pdf").write_bytes(b"placeholder")
@@ -185,6 +209,72 @@ class AgentLaboratoryArxivTests(unittest.TestCase):
             search.result = "remote results"
             self.assertEqual(search.find_papers_by_str("query"), "remote results")
             self.assertEqual(search.retrieve_full_paper_text("2501.04227"), "remote paper")
+
+    def test_non_rcb_workspace_does_not_activate_local_pdf_transport(self):
+        arxiv = types.ModuleType("arxiv")
+        arxiv.Client = type("Client", (FakeClient,), {})
+        tools = types.ModuleType("tools")
+        tools.ArxivSearch = type("ArxivSearch", (FakeArxivSearch,), {})
+        with tempfile.TemporaryDirectory() as raw, patch.dict(
+            sys.modules, {"arxiv": arxiv, "tools": tools}
+        ):
+            workspace = Path(raw)
+            related = workspace / "related_work"
+            related.mkdir()
+            (related / "paper.pdf").write_bytes(b"paperbench-like primary PDF")
+            self.assertEqual(_install_arxiv_transport(workspace), 0)
+            search = tools.ArxivSearch()
+            search.result = "native benchmark search"
+            self.assertEqual(search.find_papers_by_str("query"), "native benchmark search")
+
+    def test_rcb_guard_bounds_each_local_paper_to_full_text_then_add(self):
+        pypdf = types.ModuleType("pypdf")
+
+        class Page:
+            def __init__(self, text):
+                self.text = text
+
+            def extract_text(self):
+                return self.text
+
+        class Reader:
+            def __init__(self, path):
+                stem = Path(path).stem
+                self.metadata = types.SimpleNamespace(
+                    title=f"Study {stem}", subject="", keywords=""
+                )
+                self.pages = [Page(f"Evidence from {stem}.")]
+
+        workflow = types.SimpleNamespace(phd=GuardPhD())
+        pypdf.PdfReader = Reader
+        with tempfile.TemporaryDirectory() as raw, patch.dict(sys.modules, {"pypdf": pypdf}):
+            workspace = Path(raw)
+            mark_researchclawbench(workspace)
+            related = workspace / "related_work"
+            related.mkdir()
+            (related / "paper_000.pdf").write_bytes(b"first")
+            (related / "paper_001.pdf").write_bytes(b"second")
+
+            self.assertEqual(
+                _install_researchclawbench_literature_guard(workflow, workspace),
+                2,
+            )
+            first_full = workflow.phd.inference("topic", "literature review")
+            self.assertIn("```FULL_TEXT\nlocal-paper-000", first_full)
+            first_add = workflow.phd.inference("topic", "literature review", feedback="full")
+            self.assertIn("```ADD_PAPER\nlocal-paper-000", first_add)
+            workflow.phd.lit_review.append({"arxiv_id": "local-paper-000"})
+
+            second_full = workflow.phd.inference("topic", "literature review")
+            self.assertIn("```FULL_TEXT\nlocal-paper-001", second_full)
+            second_add = workflow.phd.inference("topic", "literature review", feedback="full")
+            self.assertIn("```ADD_PAPER\nlocal-paper-001", second_add)
+
+            untouched = workflow.phd.inference("topic", "plan formulation")
+            self.assertIn("```SUMMARY", untouched)
+
+            restored = pickle.loads(pickle.dumps(workflow.phd))
+            self.assertIn("```FULL_TEXT", restored.inference("topic", "literature review"))
 
 
 if __name__ == "__main__":

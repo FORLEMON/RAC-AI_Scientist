@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import pickle
 import re
@@ -143,6 +144,20 @@ ARXIV_ID_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+RCB_BENCHMARK_NAME = "researchclawbench"
+
+
+def _is_researchclawbench_workspace(workspace: Path | None) -> bool:
+    """Require an explicit RAC-created marker before applying RCB-only adapters."""
+    if workspace is None:
+        return False
+    marker = workspace / ".rac" / "benchmark.json"
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return payload.get("benchmark") == RCB_BENCHMARK_NAME
+
 
 def _arxiv_aliases(value: str) -> list[str]:
     """Return stable arXiv identifiers found in metadata, text, IDs, or URLs."""
@@ -219,7 +234,11 @@ def _install_arxiv_transport(workspace: Path | None = None) -> int:
     import arxiv
     from tools import ArxivSearch
 
-    local_papers = _local_literature(workspace) if workspace is not None else {}
+    local_papers = (
+        _local_literature(workspace)
+        if _is_researchclawbench_workspace(workspace)
+        else {}
+    )
     ArxivSearch._rac_local_papers = local_papers
 
     original_init = arxiv.Client.__init__
@@ -268,6 +287,88 @@ def _install_arxiv_transport(workspace: Path | None = None) -> int:
         retrieve_full_paper_text._rac_local = True
         ArxivSearch.retrieve_full_paper_text = retrieve_full_paper_text
     return len(local_papers)
+
+
+def _command_payload(response: str, command: str) -> str | None:
+    match = re.search(rf"```{re.escape(command)}\s*\n(.*?)```", response, re.DOTALL)
+    return match.group(1).strip() if match else None
+
+
+class _ResearchClawBenchLiteratureGuard:
+    """Pickle-safe bounded wrapper around the native PhD inference method."""
+
+    def __init__(self, phd: Any, papers: dict[str, dict[str, Any]]):
+        self.phd = phd
+        self.papers = papers
+        self.original_inference = phd.inference
+        self.pending_id: str | None = None
+
+    def _remaining_papers(self) -> list[tuple[str, dict[str, Any]]]:
+        added = {
+            str(item.get("arxiv_id") or "").strip()
+            for item in getattr(self.phd, "lit_review", [])
+            if isinstance(item, dict)
+        }
+        return [
+            (paper_id, paper)
+            for paper_id, paper in self.papers.items()
+            if not any(_lookup_local_paper({paper_id: paper}, item) for item in added)
+        ]
+
+    def __call__(self, *args, **kwargs):
+        response = self.original_inference(*args, **kwargs)
+        phase = args[1] if len(args) > 1 else kwargs.get("phase")
+        if phase != "literature review":
+            return response
+
+        remaining = self._remaining_papers()
+        if not remaining:
+            return response
+        remaining_by_id = dict(remaining)
+        if self.pending_id not in remaining_by_id:
+            self.pending_id = None
+
+        if self.pending_id is not None:
+            payload = _command_payload(str(response), "ADD_PAPER")
+            candidate = payload.splitlines()[0].strip() if payload else ""
+            if candidate and _lookup_local_paper(
+                {self.pending_id: remaining_by_id[self.pending_id]},
+                candidate,
+            ):
+                self.pending_id = None
+                return response
+            paper = remaining_by_id[self.pending_id]
+            summary = " ".join(str(paper["summary"]).split())[:1200]
+            paper_id = self.pending_id
+            self.pending_id = None
+            return f"```ADD_PAPER\n{paper_id}\n{summary}\n```"
+
+        paper_id, _paper = remaining[0]
+        self.pending_id = paper_id
+        return f"```FULL_TEXT\n{paper_id}\n```"
+
+
+def _install_researchclawbench_literature_guard(workflow: Any, workspace: Path) -> int:
+    """Bound the native paper protocol for RCB-supplied related work.
+
+    DeepSeek can repeatedly issue SUMMARY for the same fixed local corpus until
+    Agent Laboratory exhausts its phase retry limit.  RCB already declares the
+    PDFs in ``related_work`` as the complete host-visible literature set, so
+    guide the native protocol through each supplied paper exactly once.  A
+    model-produced ADD_PAPER summary is retained when it names the pending
+    paper; otherwise a short extractive fallback prevents another search loop.
+
+    The explicit benchmark marker is mandatory so a future PaperBench or other
+    benchmark workspace containing PDFs cannot activate this behavior.
+    """
+    if not _is_researchclawbench_workspace(workspace):
+        return 0
+    papers = _local_literature(workspace)
+    if not papers:
+        return 0
+
+    workflow.phd.inference = _ResearchClawBenchLiteratureGuard(workflow.phd, papers)
+    return len(papers)
 
 
 def _install_hf_data_search(workspace: Path) -> None:
@@ -404,6 +505,17 @@ class AgentLaboratoryBridge(HostBridge):
                 lab_index=0,
                 agentRxiv=False,
             )
+            guarded_paper_count = _install_researchclawbench_literature_guard(
+                self.workflow,
+                self.workspace,
+            )
+            if (
+                _is_researchclawbench_workspace(self.workspace)
+                and guarded_paper_count != local_paper_count
+            ):
+                raise RuntimeError(
+                    "ResearchClawBench local-literature adapters disagreed about the supplied PDF count"
+                )
             if isinstance(local_paper_count, int) and local_paper_count > 0:
                 # The benchmark bundle is the complete allowed literature set.
                 # Do not keep iterating toward the upstream default of five when

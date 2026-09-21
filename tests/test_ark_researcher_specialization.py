@@ -46,17 +46,29 @@ class FakeResearchCompiler:
 class DiskResearchCompiler(FakeResearchCompiler):
     """Observed host behavior: persist a section, return only its save receipt."""
 
-    def __init__(self, workspace, *, section_body="Measured domain guidance", missing_base=None):
+    def __init__(
+        self,
+        workspace,
+        *,
+        section_body="Measured domain guidance",
+        missing_base=None,
+        section_filename="{role}_specialization.md",
+    ):
         super().__init__(workspace)
         self.section_body = section_body
         self.missing_base = missing_base
+        self.section_filename = section_filename
 
     def _write_specializations(self):
         agents = self.workspace / ".rac" / "ark_project" / "agents"
         agents.mkdir(parents=True, exist_ok=True)
         for role in DOWNSTREAM:
             section = f"## Project-Specific Knowledge\n{self.section_body}\n"
-            (self.workspace / "auto_research" / "state" / f"{role}_specialization.md").write_text(section, encoding="utf-8")
+            filename = self.section_filename.format(role=role)
+            (self.workspace / "auto_research" / "state" / filename).write_text(
+                section,
+                encoding="utf-8",
+            )
             if role != self.missing_base:
                 content = section if role in {"planner", "reviewer"} else "Saved the section to its specialization file."
                 (agents / f"{role}.prompt").write_text(f"base {role}\n\n{content}", encoding="utf-8")
@@ -113,6 +125,25 @@ class ArkResearcherSpecializationTests(unittest.TestCase):
                 self.assertIn(f"base {role}", text)
                 self.assertEqual(text.count("## Project-Specific Knowledge"), 1)
                 self.assertIn("Measured domain guidance", text)
+
+    def test_prompt_section_filename_is_restored_without_false_incomplete_error(self):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            orchestrator = DiskResearchCompiler(
+                workspace,
+                section_filename="{role}_prompt_section.md",
+            )
+            bridge = self.bridge(workspace, orchestrator)
+
+            bridge._run_native_research_specialization()
+
+            self.assertEqual(orchestrator.specialize_calls, 0)
+            self.assertTrue(bridge._research_prompts_specialized())
+            reviewer = workspace / ".rac/ark_project/agents/reviewer.prompt"
+            self.assertIn(
+                "Measured domain guidance",
+                reviewer.read_text(encoding="utf-8"),
+            )
 
     def test_saved_sections_never_replace_missing_base_prompts(self):
         with tempfile.TemporaryDirectory() as raw:

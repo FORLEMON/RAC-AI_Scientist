@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -35,6 +37,64 @@ SUBAGENTS = {
     "data_analysis": "data-analysis-agent",
     "writing": "writing-agent",
 }
+
+NATIVE_DELIVERY_RUBRIC = """Acceptance criteria for this unattended research run:
+- report/report.md exists, is nonempty, and is a self-contained final scientific report.
+- At least one nonempty analysis artifact exists under code/ or outputs/, and the report cites or describes the persisted evidence that supports its conclusions.
+- The report clearly distinguishes measured or derived results from plans and limitations; incomplete experiments are disclosed rather than presented as completed evidence.
+If any criterion is not met, continue the same research task using the existing workspace, address the grader feedback, and leave the required artifacts on disk before finishing."""
+
+_NATIVE_RUBRIC_BUILD_LOCK = threading.Lock()
+
+
+def _is_content_filter_error(exc: Exception) -> bool:
+    """Return whether a provider rejected generated text via content policy."""
+    status_code = getattr(exc, "status_code", None)
+    if status_code is None:
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    body = getattr(exc, "body", None)
+    text = f"{exc} {body}".lower()
+    marker = any(
+        item in text
+        for item in ("content_filter", "content filter", "finish_reason': 'content_filter", "jailbreak")
+    )
+    return marker and status_code in {None, 400}
+
+
+def _provider_error_usage(exc: Exception) -> tuple[int, int]:
+    """Read usage from a provider exception body or its serialized response."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        usage = body.get("usage")
+        if isinstance(usage, dict):
+            return (
+                int(usage.get("prompt_tokens", 0) or 0),
+                int(usage.get("completion_tokens", 0) or 0),
+            )
+    text = f"{exc}"
+    prompt = re.search(r"['\"]prompt_tokens['\"]\s*:\s*(\d+)", text)
+    completion = re.search(r"['\"]completion_tokens['\"]\s*:\s*(\d+)", text)
+    return (
+        int(prompt.group(1)) if prompt else 0,
+        int(completion.group(1)) if completion else 0,
+    )
+
+
+def _content_filter_retry_prompt(
+    objective: str,
+    capability_id: str,
+    contract: WorkContract | None,
+) -> str:
+    """Build a compact retry that keeps the task/contract but drops Room history."""
+    prompt = render_contract_prompt(objective, capability_id, contract)
+    return (
+        "Continue the current academic research workflow from the files already present "
+        "in the workspace. Complete only the assigned scientific step below. Treat prior "
+        "coordination messages as background and do not restate them. Persist concrete "
+        "evidence before returning.\n\n"
+        f"{prompt}\n"
+        "Never access target_study. Work only in the current workspace."
+    )
 
 
 class EvoScientistBridge(HostBridge):
@@ -75,7 +135,6 @@ class EvoScientistBridge(HostBridge):
             sys.path.insert(0, str(self.upstream))
         from EvoScientist.config import EvoScientistConfig
         from EvoScientist.llm import get_chat_model
-        from EvoScientist.EvoScientist import create_cli_agent
 
         base_url = os.environ.get("AGENT_API_BASE", "https://api.openai.com/v1")
         cfg = EvoScientistConfig(
@@ -104,7 +163,7 @@ class EvoScientistBridge(HostBridge):
         }
         model_options = {"profile": {"image_inputs": False, "pdf_inputs": False}} if azure_text_only else {}
         chat_model = get_chat_model(model=self.model, provider="custom-openai", **model_options)
-        self.agent = create_cli_agent(
+        self.agent = _create_cli_agent_with_native_rubric(
             workspace_dir=str(self.workspace), config=cfg, chat_model=chat_model
         )
         native = self.workspace / "evo_scientist_native"
@@ -115,7 +174,7 @@ class EvoScientistBridge(HostBridge):
         self.initialize(episode_id=episode_id, workspace=workspace, objective=objective, seed=seed)
 
     def run_native(self) -> NativeRunResult:
-        """Give the complete job once to EvoScientist's native deep agent."""
+        """Run one native EvoScientist task with its own rubric-driven revision loop."""
         self._require_initialized()
         assert self.workspace is not None
         before, usage_before = snapshot_workspace(self.workspace), self.usage
@@ -126,19 +185,36 @@ class EvoScientistBridge(HostBridge):
             "Run real analyses where feasible, preserve code in code/ and results in outputs/, and write the final "
             "self-contained Markdown paper to report/report.md. Continue until the report is evidence-grounded and complete."
         )
-        result = self._invoke_agent(prompt)
+        transcript_dir = self.workspace / "state" / "evo_scientist"
+        transcript_dir.mkdir(parents=True, exist_ok=True)
+        retry_prompt = (
+            "Complete the supplied academic research task using only files already present "
+            "in the workspace. Persist executable analysis under code/ or outputs/ and write "
+            "the evidence-grounded final report to report/report.md. Never access or infer a "
+            f"hidden target study.\n\nObjective:\n{self.objective}"
+        )
+        result = self._invoke_agent(
+            prompt,
+            rubric=NATIVE_DELIVERY_RUBRIC,
+            retry_prompt=retry_prompt,
+        )
         messages = result.get("messages", []) if isinstance(result, dict) else []
         self._collect_usage(messages)
         output = _message_text(messages[-1]) if messages else str(result)
-        transcript = self.workspace / "state" / "evo_scientist" / "native_run.md"
-        transcript.parent.mkdir(parents=True, exist_ok=True)
-        transcript.write_text(output, encoding="utf-8")
-        report = self.workspace / "report" / "report.md"
-        complete = report.is_file() and bool(report.read_text(encoding="utf-8", errors="replace").strip())
+        (transcript_dir / "native_run.md").write_text(output, encoding="utf-8")
+        complete = self._native_report_complete()
         self.terminal = True
+        if complete:
+            reason = "EvoScientist native rubric-guided deep-agent run completed"
+            native_status = "completed"
+        else:
+            reason = "EvoScientist native rubric loop returned without report/report.md"
+            native_status = "missing_report"
         return NativeRunResult(
             status="completed" if complete else "stop",
-            reason="EvoScientist native deep-agent run completed" if complete else "EvoScientist returned without report/report.md",
+            reason=reason,
+            # One RAC/native invocation. EvoScientist's RubricMiddleware owns
+            # its internal grade-and-revise iterations (max_iterations=2).
             native_iterations=1,
             artifacts_before=before,
             artifacts_after=snapshot_workspace(self.workspace),
@@ -151,7 +227,14 @@ class EvoScientistBridge(HostBridge):
                 cost_source=self.usage.cost_source,
                 token_source=self.usage.token_source,
             ),
-            native_status="completed" if complete else "missing_report",
+            native_status=native_status,
+        )
+
+    def _native_report_complete(self) -> bool:
+        assert self.workspace is not None
+        report = self.workspace / "report" / "report.md"
+        return report.is_file() and bool(
+            report.read_text(encoding="utf-8", errors="replace").strip()
         )
 
     def checkpoint(self) -> Checkpoint:
@@ -188,9 +271,12 @@ class EvoScientistBridge(HostBridge):
         output, error, proposed_done = "", None, False
         metrics: dict[str, float] = {}
         try:
-            prompt = self._prompt(capability_id, contract)
-            prompt = self.communication_prompt(capability_id, prompt, contract)
-            result = self._invoke_agent(prompt)
+            native_prompt = self._prompt(capability_id, contract)
+            prompt = self.communication_prompt(capability_id, native_prompt, contract)
+            retry_prompt = _content_filter_retry_prompt(
+                self.objective, capability_id, contract
+            )
+            result = self._invoke_agent(prompt, retry_prompt=retry_prompt)
             messages = result.get("messages", []) if isinstance(result, dict) else []
             output = _message_text(messages[-1]) if messages else str(result)
             self._collect_usage(messages)
@@ -218,14 +304,49 @@ class EvoScientistBridge(HostBridge):
                 cost_source="unavailable", token_source="provider_response",
             ), error=error, proposed_done=proposed_done, metrics=metrics)
 
-    def _invoke_agent(self, prompt: str):
+    def _invoke_agent(
+        self,
+        prompt: str,
+        *,
+        rubric: str | None = None,
+        retry_prompt: str | None = None,
+    ):
         from EvoScientist.middleware.code_interpreter import aclose_code_interpreters
 
         try:
-            return self.agent.invoke(
-                {"messages": [{"role": "user", "content": prompt}]},
-                config={"configurable": {"thread_id": self.episode_id}},
-            )
+            for attempt in range(2):
+                active_prompt = prompt if attempt == 0 else retry_prompt
+                if active_prompt is None:
+                    break
+                payload: dict[str, Any] = {
+                    "messages": [{"role": "user", "content": active_prompt}],
+                }
+                if rubric:
+                    payload["rubric"] = rubric
+                thread_id = self.episode_id
+                if attempt:
+                    thread_id = f"{self.episode_id}-provider-retry-h{getattr(self, 'hop', 0)}"
+                try:
+                    return self.agent.invoke(
+                        payload,
+                        config={"configurable": {"thread_id": thread_id}},
+                    )
+                except Exception as exc:
+                    if attempt != 0 or retry_prompt is None or not _is_content_filter_error(exc):
+                        raise
+                    prompt_tokens, completion_tokens = _provider_error_usage(exc)
+                    usage = getattr(self, "usage", Usage())
+                    self.usage = replace(
+                        usage,
+                        input_tokens=usage.input_tokens + prompt_tokens,
+                        output_tokens=usage.output_tokens + completion_tokens,
+                        agent_calls=usage.agent_calls + 1,
+                    )
+                    print(
+                        "[RAC] provider-filter retry with compact academic task context",
+                        file=sys.stderr,
+                    )
+            raise RuntimeError("provider-filter retry was not configured")
         finally:
             # Provider errors skip native after-agent hooks. Close QuickJS workers
             # while Python can still service their event loops, not during GC.
@@ -285,3 +406,45 @@ def _message_text(message: Any) -> str:
     if isinstance(content, list):
         return "\n".join(str(item.get("text", item)) if isinstance(item, dict) else str(item) for item in content)
     return str(content)
+
+
+def _create_cli_agent_with_native_rubric(*, workspace_dir: str, config: Any, chat_model: Any):
+    """Build the normal CLI agent with EvoScientist's native rubric middleware last.
+
+    The pinned upstream factory does not expose an ``extra_middleware`` hook. Its
+    middleware builder is therefore wrapped only while the graph is constructed.
+    The grader gets an equivalent read-only view of the same workspace, and the
+    original builder is restored before this function returns.
+    """
+    import EvoScientist.EvoScientist as evo_api
+    from EvoScientist.backends import CustomSandboxBackend
+    from EvoScientist.subagents._factory import _scheduler_rubric_middleware
+
+    grader_backend = CustomSandboxBackend(
+        root_dir=workspace_dir,
+        virtual_mode=True,
+        timeout=config.sandbox_execute_timeout,
+        dangerous=config.dangerous_mode,
+        guard_dangerous=config.auto_approve,
+    )
+    original_builder = evo_api._get_default_middleware
+
+    def build_with_rubric(*args, **kwargs):
+        middleware = list(original_builder(*args, **kwargs))
+        middleware.append(
+            _scheduler_rubric_middleware(model=chat_model, backend=grader_backend)
+        )
+        return middleware
+
+    # Graph construction is synchronous. Serialize the temporary module-level
+    # override so concurrent bridge initialization cannot observe another build.
+    with _NATIVE_RUBRIC_BUILD_LOCK:
+        evo_api._get_default_middleware = build_with_rubric
+        try:
+            return evo_api.create_cli_agent(
+                workspace_dir=workspace_dir,
+                config=config,
+                chat_model=chat_model,
+            )
+        finally:
+            evo_api._get_default_middleware = original_builder
