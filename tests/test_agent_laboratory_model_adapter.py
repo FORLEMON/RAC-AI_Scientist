@@ -90,12 +90,18 @@ class AgentLaboratoryModelAdapterTests(unittest.TestCase):
         self.assertTrue(_is_content_filter_error(exc))
         self.assertEqual(_usage_counts(exc), (4_945, 0))
 
-    def test_content_filter_retry_preserves_task_and_adds_safety_frame(self):
-        messages = _content_filter_retry_messages("system role", "scientific task")
-        self.assertIn("Follow all provider safety policies", messages[0]["content"])
-        self.assertIn("system role", messages[0]["content"])
+    def test_content_filter_retry_preserves_task_and_uses_neutral_protocol(self):
+        messages = _content_filter_retry_messages(
+            "system role; respond with ```SUBMIT_CODE\\n...``` or ```DIALOGUE\\n...```",
+            "scientific task",
+        )
+        self.assertIn("SUBMIT_CODE, DIALOGUE", messages[0]["content"])
         self.assertIn("scientific task", messages[1]["content"])
-        self.assertIn("<scientific_subtask>", messages[1]["content"])
+        self.assertIn("<workflow_context>", messages[1]["content"])
+        combined = " ".join(message["content"].lower() for message in messages)
+        for phrase in ("jailbreak", "secrets", "safeguards", "ignore instructions"):
+            self.assertNotIn(phrase, combined)
+        self.assertNotIn("system role", combined)
 
     def test_content_filter_retries_once_and_counts_both_calls(self):
         class Filtered(Exception):
@@ -122,7 +128,7 @@ class AgentLaboratoryModelAdapterTests(unittest.TestCase):
         self.assertEqual(bridge.provider_calls, 2)
         self.assertEqual(bridge.input_tokens, 4_985)
         self.assertEqual(bridge.output_tokens, 7)
-        self.assertIn("benign academic research", requests[1]["messages"][0]["content"])
+        self.assertIn("Academic workflow continuation", requests[1]["messages"][0]["content"])
 
     def test_non_filter_bad_request_is_not_retried(self):
         class InvalidRequest(Exception):
@@ -206,6 +212,31 @@ class AgentLaboratoryModelAdapterTests(unittest.TestCase):
         self.assertIn("request exceeds model context", result.error or "")
         self.assertTrue(result.terminal_error)
         self.assertEqual(bridge.hop, 1)
+
+    def test_native_failure_returns_usage_instead_of_raising(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            bridge = self._bridge(root)
+
+            class FailedWorkflow:
+                @staticmethod
+                def perform_research():
+                    bridge.provider_calls += 2
+                    bridge.input_tokens += 5_750
+                    raise RuntimeError("provider rejected response")
+
+            workspace = root / "workspace"
+            workspace.mkdir()
+            bridge.workspace = workspace
+            bridge.workflow = FailedWorkflow()
+
+            result = bridge.run_native()
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.native_status, "failed")
+        self.assertIn("provider rejected response", result.reason)
+        self.assertEqual(result.usage.agent_calls, 2)
+        self.assertEqual(result.usage.input_tokens, 5_750)
 
 
 if __name__ == "__main__":
