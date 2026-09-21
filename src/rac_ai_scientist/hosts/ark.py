@@ -476,6 +476,30 @@ class ArkBridge(HostBridge):
                 return (text[heading.start():heading.end()] + body).strip()
         return ""
 
+    @classmethod
+    def _research_specialization_from_context(cls, text: str, role: str) -> str:
+        """Extract a role-labelled specialization accidentally saved in project context.
+
+        ARK researchers sometimes persist the requested section under a heading such
+        as ``### For the Planner Agent`` in ``project_context.md`` instead of editing
+        the canonical prompt.  Restrict recovery to explicit Markdown role headings;
+        an incidental mention of a role elsewhere in the context is not sufficient.
+        """
+        role_heading = re.compile(
+            rf"(?im)^#{{1,6}}[ \t]+[^\r\n]*\b{re.escape(role)}\b[^\r\n]*"
+            r"\b(?:agent|prompt)\b[^\r\n]*$"
+        )
+        downstream_heading = re.compile(
+            r"(?im)^#{1,6}[ \t]+[^\r\n]*\b(?:experimenter|planner|reviewer|writer|coder)\b"
+            r"[^\r\n]*\b(?:agent|prompt)\b[^\r\n]*$"
+        )
+        for heading in role_heading.finditer(text):
+            next_role = downstream_heading.search(text, heading.end())
+            region = text[heading.end():next_role.start() if next_role else len(text)]
+            if section := cls._research_specialization_section(region):
+                return section
+        return ""
+
     def _missing_research_specializations(self) -> list[Path]:
         assert self.workspace is not None
         context = self.workspace / "auto_research" / "state" / "project_context.md"
@@ -493,15 +517,21 @@ class ArkBridge(HostBridge):
         """Hand native on-disk sections to existing prompts when the return was a receipt."""
         assert self.workspace is not None
         state = self.workspace / "auto_research" / "state"
+        context_path = state / "project_context.md"
+        context_text = (
+            context_path.read_text(encoding="utf-8")
+            if context_path.is_file()
+            else ""
+        )
         for prompt in self._missing_research_specializations():
             if prompt.suffix != ".prompt" or not prompt.is_file():
                 continue
-            # ARK agents have emitted both names in real runs. The filename is
-            # not evidence by itself: accept only a valid persisted section and
-            # append it to the existing canonical prompt.
+            # ARK agents have emitted all three names in real runs. The filename
+            # is not evidence by itself: accept only a valid persisted section.
             sources = (
                 state / f"{prompt.stem}_specialization.md",
                 state / f"{prompt.stem}_prompt_section.md",
+                state / f"{prompt.stem}_knowledge.md",
             )
             section = next(
                 (
@@ -516,6 +546,11 @@ class ArkBridge(HostBridge):
                 ),
                 "",
             )
+            if not section and context_text:
+                section = self._research_specialization_from_context(
+                    context_text,
+                    prompt.stem,
+                )
             if section:
                 with prompt.open("a", encoding="utf-8") as handle:
                     handle.write(f"\n\n{section}\n")
