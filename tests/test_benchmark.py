@@ -28,6 +28,10 @@ class BenchmarkTests(unittest.TestCase):
             self.assertNotIn("target_study", instructions)
             self.assertFalse((workspace / "target_study").exists())
             self.assertFalse((workspace / ".env").exists())
+            benchmark_marker = json.loads(
+                (workspace / ".rac" / "benchmark.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(benchmark_marker["benchmark"], "researchclawbench")
             assert_no_target_study(workspace)
 
     def test_leak_check_fails_closed(self):

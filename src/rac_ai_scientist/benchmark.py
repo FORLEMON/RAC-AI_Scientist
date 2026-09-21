@@ -193,6 +193,14 @@ def materialize_rcb_workspace(task_dir: Path, destination: Path) -> dict:
         json.dumps({"task_id": task_id, "data": validation_findings}, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+    (destination / ".rac" / "benchmark.json").write_text(
+        json.dumps(
+            {"schema_version": 1, "benchmark": "researchclawbench"},
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     if target.resolve() == destination or target.resolve() in destination.parents:
         raise BenchmarkBoundaryError("target_study leaked into episode workspace")
     return {**info, "data": data_items, "input_validation": validation_findings}

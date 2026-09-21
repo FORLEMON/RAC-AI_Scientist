@@ -35,6 +35,64 @@ class ArkInvocationContractTests(unittest.TestCase):
             persist.assert_not_called()
             normalize.assert_not_called()
 
+    def test_content_filter_retries_once_with_compact_native_prompt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+
+            def run_agent(role, prompt, **kwargs):
+                calls.append((role, prompt, kwargs))
+                if len(calls) == 1:
+                    bridge.orchestrator._terminal_error = (
+                        "LLMBadRequestError: Error code: 400; "
+                        "finish_reason': 'content_filter'"
+                    )
+                    return ""
+                return "Writer recovered and persisted the report."
+
+            bridge = self.make_bridge(Path(directory), run_agent)
+            result = bridge.invoke("writer", None)
+
+            self.assertEqual(len(calls), 2)
+            self.assertIsNone(result.error)
+            self.assertFalse(result.terminal_error)
+            self.assertEqual(result.metrics["provider_filter_retried"], 1.0)
+            self.assertIn("Use neutral technical language", calls[1][1])
+            self.assertIn("Analyze the supplied measurements", calls[1][1])
+
+    def test_second_content_filter_remains_terminal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+
+            def run_agent(*args, **kwargs):
+                calls.append((args, kwargs))
+                bridge.orchestrator._terminal_error = "content_filter: Jailbreak"
+                return ""
+
+            bridge = self.make_bridge(Path(directory), run_agent)
+            result = bridge.invoke("writer", None)
+
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(result.terminal_error)
+            self.assertIn("content_filter", result.error)
+
+    def test_unrelated_bad_request_is_not_retried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+
+            def run_agent(*args, **kwargs):
+                calls.append((args, kwargs))
+                bridge.orchestrator._terminal_error = (
+                    "LLMBadRequestError: Error code: 400 invalid_parameter"
+                )
+                return ""
+
+            bridge = self.make_bridge(Path(directory), run_agent)
+            result = bridge.invoke("writer", None)
+
+            self.assertEqual(len(calls), 1)
+            self.assertTrue(result.terminal_error)
+            self.assertNotIn("provider_filter_retried", result.metrics)
+
     def test_writer_acceptance_retains_unassigned_execution_issue(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

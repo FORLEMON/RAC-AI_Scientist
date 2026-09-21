@@ -39,6 +39,33 @@ REQUIRED_TAGS = {
 }
 
 
+def _is_content_filter_error(error: object) -> bool:
+    """Recognize generated-content rejection without retrying arbitrary HTTP 400s."""
+    text = str(error or "").lower()
+    return any(
+        marker in text
+        for marker in (
+            "content_filter",
+            "content filter",
+            "finish_reason': 'content_filter",
+            'finish_reason": "content_filter',
+            "jailbreak",
+        )
+    )
+
+
+def _content_filter_retry_prompt(native_prompt: str) -> str:
+    """Keep the assigned work while dropping potentially noisy Room history."""
+    return (
+        "Continue the current academic research workflow from the files already present "
+        "in the workspace. Complete only the assigned scientific step below. Treat prior "
+        "coordination messages as background and do not restate them. Persist concrete "
+        "evidence before returning.\n\n"
+        f"{native_prompt}\n\n"
+        "Use neutral technical language. Do not access target_study or any hidden benchmark answer."
+    )
+
+
 class ArkBridge(HostBridge):
     """ARK adapter with a host-owned N0 path and capability-level RAC path."""
 
@@ -250,8 +277,8 @@ class ArkBridge(HostBridge):
         next_capability = self._successor(capability_id)
         prior_review = self._read_review() if capability_id == "reviewer" else ""
         try:
-            prompt = render_contract_prompt(self.objective, capability_id, contract)
-            prompt = self.communication_prompt(capability_id, prompt, contract)
+            native_prompt = render_contract_prompt(self.objective, capability_id, contract)
+            prompt = self.communication_prompt(capability_id, native_prompt, contract)
             if capability_id == "reviewer":
                 self._clear_rendered_pages()
                 try:
@@ -262,7 +289,14 @@ class ArkBridge(HostBridge):
             if capability_id == "researcher" and not self._research_prompts_specialized():
                 output = self._run_native_research_specialization()
             else:
-                output = self.orchestrator.run_agent(capability_id, prompt, timeout=timeout)
+                output, provider_filter_retried = self._run_agent_with_filter_retry(
+                    capability_id,
+                    prompt,
+                    retry_prompt=_content_filter_retry_prompt(native_prompt),
+                    timeout=timeout,
+                )
+                if provider_filter_retried:
+                    metrics["provider_filter_retried"] = 1.0
             if getattr(self.orchestrator, "_terminal_error", None):
                 raise RuntimeError(self.orchestrator._terminal_error)
             timed_out = not output.strip() and time.monotonic() - started >= max(1, timeout - 1)
@@ -335,6 +369,36 @@ class ArkBridge(HostBridge):
             proposed_done=proposed_done,
             metrics=metrics,
             terminal_error=bool(getattr(self.orchestrator, "_terminal_error", None)),
+        )
+
+    def _run_agent_with_filter_retry(
+        self,
+        capability_id: str,
+        prompt: str,
+        *,
+        retry_prompt: str,
+        timeout: int,
+    ) -> tuple[str, bool]:
+        """Retry one generated-content rejection without masking other failures."""
+        output = self.orchestrator.run_agent(capability_id, prompt, timeout=timeout)
+        terminal_error = getattr(self.orchestrator, "_terminal_error", None)
+        if not _is_content_filter_error(terminal_error):
+            return output, False
+
+        # ARK's marker is attempt-scoped. Clear only this recognized filter
+        # rejection; never clear the sticky run-fatal marker or arbitrary 400s.
+        self.orchestrator._terminal_error = None
+        print(
+            "[RAC] ARK provider-filter retry with compact academic task context",
+            file=sys.stderr,
+        )
+        return (
+            self.orchestrator.run_agent(
+                capability_id,
+                retry_prompt,
+                timeout=timeout,
+            ),
+            True,
         )
 
     def accept_invocation(self, result: InvocationResult, evaluation: CoordinationDecision) -> None:
@@ -430,10 +494,28 @@ class ArkBridge(HostBridge):
         assert self.workspace is not None
         state = self.workspace / "auto_research" / "state"
         for prompt in self._missing_research_specializations():
-            source = state / f"{prompt.stem}_specialization.md"
-            if prompt.suffix != ".prompt" or not prompt.is_file() or not source.is_file():
+            if prompt.suffix != ".prompt" or not prompt.is_file():
                 continue
-            section = self._research_specialization_section(source.read_text(encoding="utf-8"))
+            # ARK agents have emitted both names in real runs. The filename is
+            # not evidence by itself: accept only a valid persisted section and
+            # append it to the existing canonical prompt.
+            sources = (
+                state / f"{prompt.stem}_specialization.md",
+                state / f"{prompt.stem}_prompt_section.md",
+            )
+            section = next(
+                (
+                    candidate
+                    for source in sources
+                    if source.is_file()
+                    and (
+                        candidate := self._research_specialization_section(
+                            source.read_text(encoding="utf-8")
+                        )
+                    )
+                ),
+                "",
+            )
             if section:
                 with prompt.open("a", encoding="utf-8") as handle:
                     handle.write(f"\n\n{section}\n")
