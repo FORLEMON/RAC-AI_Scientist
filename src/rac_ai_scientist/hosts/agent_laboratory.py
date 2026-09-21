@@ -137,9 +137,43 @@ class _ArxivTimedSession:
         return self.inner.get(url, timeout=(5, 30), **kwargs)
 
 
-def _local_literature(workspace: Path) -> dict[str, dict[str, str]]:
+ARXIV_ID_PATTERN = re.compile(
+    r"(?:(?:https?://)?(?:www\.)?arxiv\.org/(?:abs|pdf)/|arxiv\s*:\s*)?"
+    r"(?<!\d)(\d{4}\.\d{4,5})(v\d+)?(?!\d)",
+    re.IGNORECASE,
+)
+
+
+def _arxiv_aliases(value: str) -> list[str]:
+    """Return stable arXiv identifiers found in metadata, text, IDs, or URLs."""
+    aliases: list[str] = []
+    for match in ARXIV_ID_PATTERN.finditer(value):
+        base = match.group(1)
+        version = match.group(2)
+        for alias in (base, f"{base}{version}" if version else None):
+            if alias and alias not in aliases:
+                aliases.append(alias)
+    return aliases
+
+
+def _lookup_local_paper(
+    papers: dict[str, dict[str, Any]], query: str
+) -> dict[str, Any] | None:
+    """Resolve synthetic IDs and common arXiv ID spellings to a supplied PDF."""
+    candidate = query.strip()
+    if candidate in papers:
+        return papers[candidate]
+    query_aliases = _arxiv_aliases(candidate)
+    for paper in papers.values():
+        aliases = paper.get("aliases", ())
+        if candidate in aliases or any(alias in aliases for alias in query_aliases):
+            return paper
+    return None
+
+
+def _local_literature(workspace: Path) -> dict[str, dict[str, Any]]:
     """Load benchmark-supplied PDFs for Agent Laboratory's native literature tools."""
-    papers: dict[str, dict[str, str]] = {}
+    papers: dict[str, dict[str, Any]] = {}
     related_work = workspace / "related_work"
     if not related_work.is_dir():
         return papers
@@ -159,12 +193,23 @@ def _local_literature(workspace: Path) -> dict[str, dict[str, str]]:
             continue
         metadata = getattr(reader, "metadata", None)
         title = str(getattr(metadata, "title", "") or path.stem).strip()
-        paper_id = f"local-paper-{index:03d}"
+        local_id = f"local-paper-{index:03d}"
+        metadata_text = " ".join(
+            str(value or "")
+            for value in (
+                title,
+                getattr(metadata, "subject", ""),
+                getattr(metadata, "keywords", ""),
+            )
+        )
+        arxiv_aliases = _arxiv_aliases(f"{metadata_text}\n{full_text}")
+        paper_id = arxiv_aliases[0] if arxiv_aliases else local_id
         papers[paper_id] = {
             "title": title,
             "summary": " ".join(full_text.split())[:3000],
             "full_text": full_text[:50000],
             "path": path.relative_to(workspace).as_posix(),
+            "aliases": tuple(dict.fromkeys((local_id, paper_id, *arxiv_aliases))),
         }
     return papers
 
@@ -213,12 +258,11 @@ def _install_arxiv_transport(workspace: Path | None = None) -> int:
     if not getattr(original_full_text, "_rac_local", False):
         def retrieve_full_paper_text(search, query, MAX_LEN=50000):
             supplied = getattr(type(search), "_rac_local_papers", {})
-            paper = supplied.get(query.strip())
+            paper = _lookup_local_paper(supplied, query)
             if paper is not None:
                 return paper["full_text"][:MAX_LEN]
-            if supplied:
-                available = ", ".join(sorted(supplied))
-                raise ValueError(f"unknown supplied local paper id {query!r}; available ids: {available}")
+            # The requested paper is genuinely absent from the benchmark
+            # bundle. Preserve Agent Laboratory's native arXiv fallback.
             return original_full_text(search, query, MAX_LEN=MAX_LEN)
 
         retrieve_full_paper_text._rac_local = True
