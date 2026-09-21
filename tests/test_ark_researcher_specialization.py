@@ -97,7 +97,7 @@ class ArkResearcherSpecializationTests(unittest.TestCase):
                 prompt = workspace / ".rac" / "ark_project" / "agents" / f"{name}.prompt"
                 self.assertIn("## Project-Specific Knowledge", prompt.read_text(encoding="utf-8"))
 
-    def test_partial_native_research_phase_repairs_missing_prompt_specializations(self):
+    def test_partial_native_research_phase_advances_without_prompt_gate_or_retry(self):
         with tempfile.TemporaryDirectory() as raw:
             workspace = Path(raw)
             orchestrator = FakeResearchCompiler(workspace, complete_in_phase=False)
@@ -106,8 +106,8 @@ class ArkResearcherSpecializationTests(unittest.TestCase):
             bridge._run_native_research_specialization()
 
             self.assertEqual(orchestrator.phase_calls, 1)
-            self.assertEqual(orchestrator.specialize_calls, 1)
-            self.assertTrue(bridge._research_prompts_specialized())
+            self.assertEqual(orchestrator.specialize_calls, 0)
+            self.assertFalse(bridge._research_prompts_specialized())
 
     def test_saved_native_sections_are_handed_to_existing_prompts_without_another_model_pass(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -165,6 +165,41 @@ class ArkResearcherSpecializationTests(unittest.TestCase):
                 experimenter.read_text(encoding="utf-8"),
             )
 
+    def test_outputs_specialization_is_restored_best_effort(self):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            orchestrator = DiskResearchCompiler(workspace)
+
+            def write_outputs():
+                orchestrator._write_context()
+                agents = workspace / ".rac" / "ark_project" / "agents"
+                outputs = workspace / "outputs"
+                agents.mkdir(parents=True, exist_ok=True)
+                outputs.mkdir(parents=True, exist_ok=True)
+                for role in DOWNSTREAM:
+                    (agents / f"{role}.prompt").write_text(
+                        f"base {role}\n\nSaved specialization to outputs.",
+                        encoding="utf-8",
+                    )
+                    (outputs / f"{role}_specialization.md").write_text(
+                        f"## Project-Specific Knowledge\n{role} output guidance.",
+                        encoding="utf-8",
+                    )
+
+            orchestrator._run_research_phase = write_outputs
+            bridge = self.bridge(workspace, orchestrator)
+
+            bridge._run_native_research_specialization()
+
+            self.assertEqual(orchestrator.specialize_calls, 0)
+            self.assertTrue(bridge._research_prompts_specialized())
+            for role in DOWNSTREAM:
+                prompt = workspace / ".rac/ark_project/agents" / f"{role}.prompt"
+                self.assertIn(
+                    f"{role} output guidance.",
+                    prompt.read_text(encoding="utf-8"),
+                )
+
     def test_role_labelled_project_context_sections_are_restored(self):
         with tempfile.TemporaryDirectory() as raw:
             workspace = Path(raw)
@@ -217,20 +252,18 @@ class ArkResearcherSpecializationTests(unittest.TestCase):
             "",
         )
 
-    def test_saved_sections_never_replace_missing_base_prompts(self):
+    def test_saved_sections_never_replace_missing_base_prompts_but_do_not_block_phase(self):
         with tempfile.TemporaryDirectory() as raw:
             workspace = Path(raw)
             bridge = self.bridge(workspace, DiskResearchCompiler(workspace, missing_base="coder"))
-            with self.assertRaisesRegex(RuntimeError, "coder.prompt"):
-                bridge._run_native_research_specialization()
+            bridge._run_native_research_specialization()
             self.assertFalse((workspace / ".rac/ark_project/agents/coder.prompt").exists())
 
-    def test_empty_sections_and_inline_receipts_do_not_satisfy_the_guard(self):
+    def test_empty_sections_and_inline_receipts_do_not_count_as_specialized_but_do_not_block(self):
         with tempfile.TemporaryDirectory() as raw:
             workspace = Path(raw)
             bridge = self.bridge(workspace, DiskResearchCompiler(workspace, section_body=""))
-            with self.assertRaisesRegex(RuntimeError, "experimenter.prompt"):
-                bridge._run_native_research_specialization()
+            bridge._run_native_research_specialization()
             prompt = workspace / ".rac/ark_project/agents/experimenter.prompt"
             prompt.write_text('The file contains `## Project-Specific Knowledge`.\nSaved successfully.', encoding="utf-8")
             self.assertFalse(bridge._research_prompts_specialized())
@@ -245,15 +278,15 @@ class ArkResearcherSpecializationTests(unittest.TestCase):
                 self.assertEqual(ArkBridge._research_specialization_section(valid + "\n" + next_heading + "\nUnrelated."), valid)
                 self.assertEqual(ArkBridge._research_specialization_section(empty + "\n" + valid), valid)
 
-    def test_missing_context_is_identified(self):
+    def test_missing_context_does_not_block_when_research_changed_other_files(self):
         with tempfile.TemporaryDirectory() as raw:
             orchestrator = FakeResearchCompiler(Path(raw))
             orchestrator._write_context = lambda: None
             bridge = self.bridge(Path(raw), orchestrator)
-            with self.assertRaisesRegex(RuntimeError, "project_context.md"):
-                bridge._run_native_research_specialization()
+            output = bridge._run_native_research_specialization()
+            self.assertIn("observable workspace changes", output)
 
-    def test_native_terminal_error_stops_before_specialization_retry(self):
+    def test_native_terminal_error_stops_without_specialization_retry(self):
         with tempfile.TemporaryDirectory() as raw:
             orchestrator = FakeResearchCompiler(Path(raw), complete_in_phase=False)
             orchestrator._terminal_error = "provider rejected the research call"
@@ -262,17 +295,14 @@ class ArkResearcherSpecializationTests(unittest.TestCase):
                 bridge._run_native_research_specialization()
             self.assertEqual(orchestrator.specialize_calls, 0)
 
-    def test_native_terminal_error_from_specialization_retry_is_preserved(self):
+    def test_no_workspace_change_is_rejected_without_specialization_retry(self):
         with tempfile.TemporaryDirectory() as raw:
             orchestrator = FakeResearchCompiler(Path(raw), complete_in_phase=False)
-            def fail_specialize():
-                orchestrator.specialize_calls += 1
-                orchestrator._terminal_error = "provider rejected the specialization call"
-            orchestrator._specialize_agent_prompts = fail_specialize
+            orchestrator._run_research_phase = lambda: None
             bridge = self.bridge(Path(raw), orchestrator)
-            with self.assertRaisesRegex(RuntimeError, "provider rejected the specialization call"):
+            with self.assertRaisesRegex(RuntimeError, "no new or modified workspace file"):
                 bridge._run_native_research_specialization()
-            self.assertEqual(orchestrator.specialize_calls, 1)
+            self.assertEqual(orchestrator.specialize_calls, 0)
 
 
 if __name__ == "__main__":
