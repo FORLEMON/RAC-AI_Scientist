@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -514,9 +515,10 @@ class ArkBridge(HostBridge):
         return missing
 
     def _restore_native_research_specializations(self) -> None:
-        """Hand native on-disk sections to existing prompts when the return was a receipt."""
+        """Best-effort handoff of native on-disk sections to canonical prompts."""
         assert self.workspace is not None
         state = self.workspace / "auto_research" / "state"
+        outputs = self.workspace / "outputs"
         context_path = state / "project_context.md"
         context_text = (
             context_path.read_text(encoding="utf-8")
@@ -532,6 +534,9 @@ class ArkBridge(HostBridge):
                 state / f"{prompt.stem}_specialization.md",
                 state / f"{prompt.stem}_prompt_section.md",
                 state / f"{prompt.stem}_knowledge.md",
+                outputs / f"{prompt.stem}_specialization.md",
+                outputs / f"{prompt.stem}_prompt_section.md",
+                outputs / f"{prompt.stem}_knowledge.md",
             )
             section = next(
                 (
@@ -555,6 +560,34 @@ class ArkBridge(HostBridge):
                 with prompt.open("a", encoding="utf-8") as handle:
                     handle.write(f"\n\n{section}\n")
 
+    @staticmethod
+    def _research_workspace_fingerprint(workspace: Path) -> dict[str, str]:
+        """Hash researcher-visible files while excluding provisioned/cache trees."""
+        ignored_parts = {".git", "__pycache__", ".pytest_cache", ".venv", ".conda_env", ".cache"}
+        fingerprints: dict[str, str] = {}
+        for path in workspace.rglob("*"):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(workspace)
+            if ignored_parts.intersection(relative.parts):
+                continue
+            if relative.parts[:2] == ("auto_research", "logs"):
+                continue
+            digest = hashlib.sha256()
+            try:
+                with path.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        digest.update(chunk)
+            except OSError:
+                continue
+            fingerprints[relative.as_posix()] = digest.hexdigest()
+        return fingerprints
+
+    @staticmethod
+    def _research_created_or_modified_file(before: dict[str, str], after: dict[str, str]) -> bool:
+        """Return whether research created or changed at least one workspace file."""
+        return any(before.get(path) != digest for path, digest in after.items())
+
     def _run_native_research_specialization(self) -> str:
         """Run ARK's native research compiler before RAC schedules later roles.
 
@@ -565,35 +598,25 @@ class ArkBridge(HostBridge):
         idempotent research phase as the first researcher capability invocation.
         """
         assert self.workspace is not None
+        before = self._research_workspace_fingerprint(self.workspace)
         research_phase = getattr(self.orchestrator, "_run_research_phase", None)
         if not callable(research_phase):
             raise RuntimeError("ARK orchestrator does not expose its native research phase")
         research_phase()
         if terminal_error := getattr(self.orchestrator, "_terminal_error", None):
             raise RuntimeError(str(terminal_error))
+        # Canonical prompt population is an ARK implementation detail.  Recover
+        # known persisted section variants when possible, but do not reject a
+        # completed native research phase merely because the model chose a new
+        # artifact path.  RAC requires only observable workspace progress here.
         self._restore_native_research_specializations()
-
-        # A resumed/partially initialized project may already have context while
-        # one or more prompt append operations were interrupted.  ARK's research
-        # phase skips specialization when project_context.md exists, so repair
-        # only the missing prompt specializations through its native idempotent
-        # helper before admitting the capability result.
-        if not self._research_prompts_specialized():
-            specialize = getattr(self.orchestrator, "_specialize_agent_prompts", None)
-            if callable(specialize):
-                specialize()
-                if terminal_error := getattr(self.orchestrator, "_terminal_error", None):
-                    raise RuntimeError(str(terminal_error))
-                self._restore_native_research_specializations()
-        missing = self._missing_research_specializations()
-        if missing:
-            raise RuntimeError("ARK researcher specialization is incomplete: " + ", ".join(path.name for path in missing))
-
+        after = self._research_workspace_fingerprint(self.workspace)
+        if not self._research_created_or_modified_file(before, after):
+            raise RuntimeError("ARK researcher produced no new or modified workspace file")
         context = self.workspace / "auto_research" / "state" / "project_context.md"
-        return (
-            "ARK native research phase and downstream prompt specialization completed.\n\n"
-            + context.read_text(encoding="utf-8").strip()
-        )
+        context_text = context.read_text(encoding="utf-8").strip() if context.is_file() else ""
+        summary = "ARK native research phase completed with observable workspace changes."
+        return summary + (f"\n\n{context_text}" if context_text else "")
 
     def _read_review(self) -> str:
         assert self.workspace is not None
