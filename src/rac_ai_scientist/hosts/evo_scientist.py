@@ -45,6 +45,7 @@ NATIVE_DELIVERY_RUBRIC = """Acceptance criteria for this unattended research run
 If any criterion is not met, continue the same research task using the existing workspace, address the grader feedback, and leave the required artifacts on disk before finishing."""
 
 _NATIVE_RUBRIC_BUILD_LOCK = threading.Lock()
+_NATIVE_MAX_INVOCATIONS = 2
 
 
 def _is_content_filter_error(exc: Exception) -> bool:
@@ -145,7 +146,9 @@ class EvoScientistBridge(HostBridge):
             default_mode="run",
             default_workdir=str(self.workspace),
             auto_approve=True,
+            auto_mode=True,
             dangerous_mode=False,
+            enable_ask_user=False,
             enable_async_subagents=False,
             enable_scheduler=False,
             memory_profile_enabled=False,
@@ -181,6 +184,8 @@ class EvoScientistBridge(HostBridge):
         started = time.monotonic()
         prompt = (
             f"Complete this research task end to end using your native scientific workflow and sub-agents:\n{self.objective}\n\n"
+            "This is an unattended benchmark run. Code generation mode is already set to Lite: do not ask "
+            "the user to select a mode, and delegate code tasks to code-agent normally. "
             "Use only files already supplied in data/ and related_work/. Never seek or infer a hidden target study. "
             "Run real analyses where feasible, preserve code in code/ and results in outputs/, and write the final "
             "self-contained Markdown paper to report/report.md. Continue until the report is evidence-grounded and complete."
@@ -188,21 +193,33 @@ class EvoScientistBridge(HostBridge):
         transcript_dir = self.workspace / "state" / "evo_scientist"
         transcript_dir.mkdir(parents=True, exist_ok=True)
         retry_prompt = (
-            "Complete the supplied academic research task using only files already present "
-            "in the workspace. Persist executable analysis under code/ or outputs/ and write "
-            "the evidence-grounded final report to report/report.md. Never access or infer a "
+            "Continue the supplied academic research task from the files already present in the workspace. "
+            "This is an unattended benchmark run and code generation mode is preselected as Lite; do not ask "
+            "the user for confirmation or mode selection. Delegate code tasks normally, finish the experiments, "
+            "persist executable analysis under code/ or outputs/, and write the evidence-grounded final report "
+            "to report/report.md. Never access or infer a "
             f"hidden target study.\n\nObjective:\n{self.objective}"
         )
-        result = self._invoke_agent(
-            prompt,
-            rubric=NATIVE_DELIVERY_RUBRIC,
-            retry_prompt=retry_prompt,
-        )
-        messages = result.get("messages", []) if isinstance(result, dict) else []
-        self._collect_usage(messages)
-        output = _message_text(messages[-1]) if messages else str(result)
-        (transcript_dir / "native_run.md").write_text(output, encoding="utf-8")
-        complete = self._native_report_complete()
+        outputs: list[str] = []
+        native_iterations = 0
+        complete = False
+        for native_iterations in range(1, _NATIVE_MAX_INVOCATIONS + 1):
+            active_prompt = prompt if native_iterations == 1 else retry_prompt
+            result = self._invoke_agent(
+                active_prompt,
+                rubric=NATIVE_DELIVERY_RUBRIC,
+                retry_prompt=retry_prompt,
+            )
+            messages = result.get("messages", []) if isinstance(result, dict) else []
+            self._collect_usage(messages)
+            output = _message_text(messages[-1]) if messages else str(result)
+            outputs.append(f"## Native invocation {native_iterations}\n\n{output}")
+            (transcript_dir / "native_run.md").write_text(
+                "\n\n".join(outputs), encoding="utf-8"
+            )
+            complete = self._native_report_complete()
+            if complete:
+                break
         self.terminal = True
         if complete:
             reason = "EvoScientist native rubric-guided deep-agent run completed"
@@ -213,9 +230,10 @@ class EvoScientistBridge(HostBridge):
         return NativeRunResult(
             status="completed" if complete else "stop",
             reason=reason,
-            # One RAC/native invocation. EvoScientist's RubricMiddleware owns
-            # its internal grade-and-revise iterations (max_iterations=2).
-            native_iterations=1,
+            # Each RAC/native invocation also has EvoScientist's internal
+            # rubric grade-and-revise loop (max_iterations=2). The bounded
+            # outer continuation covers premature interactive-style returns.
+            native_iterations=native_iterations,
             artifacts_before=before,
             artifacts_after=snapshot_workspace(self.workspace),
             usage=Usage(
