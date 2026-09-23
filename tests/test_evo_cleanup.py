@@ -35,10 +35,11 @@ class EvoCleanupTests(unittest.TestCase):
         package = ModuleType('EvoScientist')
         package.__path__ = []
         config = ModuleType('EvoScientist.config')
-        config.EvoScientistConfig = lambda **kwargs: SimpleNamespace(
-            sandbox_execute_timeout=120,
-            **kwargs,
-        )
+        def make_config(**kwargs):
+            captured['config'] = kwargs
+            return SimpleNamespace(sandbox_execute_timeout=120, **kwargs)
+
+        config.EvoScientistConfig = make_config
         llm = ModuleType('EvoScientist.llm')
         llm.get_chat_model = lambda **kwargs: captured.update(kwargs) or object()
         api = ModuleType('EvoScientist.EvoScientist')
@@ -84,6 +85,8 @@ class EvoCleanupTests(unittest.TestCase):
             bridge.initialize(episode_id='test', workspace=root / 'workspace', objective='test', seed=0)
 
         self.assertEqual(captured.get('profile'), expected_profile)
+        self.assertTrue(captured['config']['auto_mode'])
+        self.assertFalse(captured['config']['enable_ask_user'])
         self.assertEqual(captured['middleware'][0], 'base-middleware')
         self.assertEqual(captured['middleware'][-1][0], 'native-rubric')
         self.assertEqual(api._get_default_middleware.__name__, '<lambda>')

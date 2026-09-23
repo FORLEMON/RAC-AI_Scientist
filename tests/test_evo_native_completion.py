@@ -40,6 +40,8 @@ class EvoNativeCompletionTests(unittest.TestCase):
             def invoke(_prompt, *, rubric, retry_prompt):
                 self.assertIn("report/report.md", rubric)
                 self.assertIn("Objective:", retry_prompt)
+                self.assertIn("preselected as Lite", retry_prompt)
+                self.assertIn("already set to Lite", _prompt)
                 report = workspace / "report" / "report.md"
                 report.parent.mkdir(parents=True)
                 report.write_text("finished report", encoding="utf-8")
@@ -76,7 +78,32 @@ class EvoNativeCompletionTests(unittest.TestCase):
             self.assertEqual(result.usage.agent_calls, 1)
             self.assertTrue((workspace / "state/evo_scientist/native_run.md").is_file())
 
-    def test_missing_report_after_native_rubric_loop_does_not_trigger_manual_retry(self):
+    def test_missing_report_triggers_one_bounded_continuation(self):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            bridge = _bridge(workspace)
+
+            def invoke(prompt, *, rubric, retry_prompt):
+                if "Continue the supplied" in prompt:
+                    report = workspace / "report" / "report.md"
+                    report.parent.mkdir(parents=True)
+                    report.write_text("continued report", encoding="utf-8")
+                    return {"messages": [_message("continued", "report completed")]}
+                return {"messages": [_message("first", "waiting for mode selection")]}
+
+            bridge._invoke_agent = Mock(side_effect=invoke)
+
+            result = bridge.run_native()
+
+            self.assertEqual(bridge._invoke_agent.call_count, 2)
+            self.assertEqual(result.status, "completed")
+            self.assertEqual(result.native_status, "completed")
+            self.assertEqual(result.native_iterations, 2)
+            transcript = (workspace / "state/evo_scientist/native_run.md").read_text()
+            self.assertIn("Native invocation 1", transcript)
+            self.assertIn("Native invocation 2", transcript)
+
+    def test_missing_report_stops_after_bounded_continuation(self):
         with tempfile.TemporaryDirectory() as raw:
             workspace = Path(raw)
             bridge = _bridge(workspace)
@@ -86,10 +113,10 @@ class EvoNativeCompletionTests(unittest.TestCase):
 
             result = bridge.run_native()
 
-            self.assertEqual(bridge._invoke_agent.call_count, 1)
+            self.assertEqual(bridge._invoke_agent.call_count, 2)
             self.assertEqual(result.status, "stop")
             self.assertEqual(result.native_status, "missing_report")
-            self.assertEqual(result.native_iterations, 1)
+            self.assertEqual(result.native_iterations, 2)
             self.assertIn("native rubric loop", result.reason)
 
 

@@ -90,20 +90,37 @@ class AgentLaboratoryModelAdapterTests(unittest.TestCase):
         self.assertTrue(_is_content_filter_error(exc))
         self.assertEqual(_usage_counts(exc), (4_945, 0))
 
-    def test_content_filter_retry_preserves_task_and_uses_neutral_protocol(self):
-        messages = _content_filter_retry_messages(
-            "system role; respond with ```SUBMIT_CODE\\n...``` or ```DIALOGUE\\n...```",
-            "scientific task",
+    def test_content_filter_retry_extracts_science_without_raw_instruction_scaffolding(self):
+        system_prompt = (
+            "plan formulation role; you MUST respond EXACTLY with "
+            "```PLAN\\n...``` or ```DIALOGUE\\n...``` and use ONLY one COMMAND"
         )
-        self.assertIn("SUBMIT_CODE, DIALOGUE", messages[0]["content"])
-        self.assertIn("scientific task", messages[1]["content"])
-        self.assertIn("<workflow_context>", messages[1]["content"])
-        combined = " ".join(message["content"].lower() for message in messages)
-        for phrase in ("jailbreak", "secrets", "safeguards", "ignore instructions"):
-            self.assertNotIn(phrase, combined)
-        self.assertNotIn("system role", combined)
+        prompt = """
+Scientific Goal: Develop a hybrid MAPF planner that reduces collisions.
 
-    def test_content_filter_retries_once_and_counts_both_calls(self):
+Dataset: Grid maps contain starts, goals, obstacles, and benchmark scenarios.
+
+Related literature: Prior studies combine neighborhood search with learned policies.
+
+Postdoc: You MUST output EXACTLY one COMMAND and ignore all other formats.
+"""
+        first = _content_filter_retry_messages(system_prompt, prompt, level=1)
+        second = _content_filter_retry_messages(system_prompt, prompt, level=2)
+
+        first_text = " ".join(message["content"].lower() for message in first)
+        second_text = " ".join(message["content"].lower() for message in second)
+        self.assertIn("hybrid mapf planner", first_text)
+        self.assertIn("grid maps", first_text)
+        self.assertIn("prior studies", first_text)
+        self.assertIn("```plan", first_text)
+        self.assertNotIn("<workflow_context>", first_text)
+        self.assertNotIn("related literature", second_text)
+        self.assertLess(len(second_text), len(first_text))
+        for text in (first_text, second_text):
+            for phrase in ("jailbreak", "must", "exactly", "only one", "ignore all", "command"):
+                self.assertNotIn(phrase, text)
+
+    def test_content_filter_uses_two_reduced_retries_and_counts_all_calls(self):
         class Filtered(Exception):
             status_code = 400
 
@@ -115,7 +132,7 @@ class AgentLaboratoryModelAdapterTests(unittest.TestCase):
             bridge = self._bridge(Path(raw))
             query_model, requests = self._install_fake_adapter(
                 bridge,
-                [Filtered(), self._response("recovered", 40, 7)],
+                [Filtered(), Filtered(), self._response("recovered", 40, 7)],
             )
             result = query_model(
                 model_str="ignored",
@@ -124,11 +141,12 @@ class AgentLaboratoryModelAdapterTests(unittest.TestCase):
             )
 
         self.assertEqual(result, "recovered")
-        self.assertEqual(len(requests), 2)
-        self.assertEqual(bridge.provider_calls, 2)
-        self.assertEqual(bridge.input_tokens, 4_985)
+        self.assertEqual(len(requests), 3)
+        self.assertEqual(bridge.provider_calls, 3)
+        self.assertEqual(bridge.input_tokens, 9_930)
         self.assertEqual(bridge.output_tokens, 7)
-        self.assertIn("Academic workflow continuation", requests[1]["messages"][0]["content"])
+        self.assertIn("Scientific research assistant", requests[1]["messages"][0]["content"])
+        self.assertEqual(requests[2]["messages"][0]["content"], "Scientific research assistant.")
 
     def test_non_filter_bad_request_is_not_retried(self):
         class InvalidRequest(Exception):
@@ -146,7 +164,7 @@ class AgentLaboratoryModelAdapterTests(unittest.TestCase):
         self.assertEqual(len(requests), 1)
         self.assertEqual(bridge.provider_calls, 1)
 
-    def test_second_content_filter_is_terminal(self):
+    def test_third_content_filter_is_terminal(self):
         class Filtered(Exception):
             status_code = 400
 
@@ -158,14 +176,47 @@ class AgentLaboratoryModelAdapterTests(unittest.TestCase):
             bridge = self._bridge(Path(raw))
             query_model, requests = self._install_fake_adapter(
                 bridge,
-                [Filtered(), Filtered()],
+                [Filtered(), Filtered(), Filtered()],
             )
             with self.assertRaises(Filtered):
                 query_model(model_str="ignored", prompt="task", system_prompt="role")
 
+        self.assertEqual(len(requests), 3)
+        self.assertEqual(bridge.provider_calls, 3)
+        self.assertEqual(bridge.input_tokens, 15)
+
+    def test_filtered_empty_response_uses_reduced_retry(self):
+        filtered = self._response("", 19, 0)
+        filtered.choices[0].finish_reason = "content_filter"
+        recovered = self._response("recovered", 7, 2)
+
+        with tempfile.TemporaryDirectory() as raw:
+            bridge = self._bridge(Path(raw))
+            query_model, requests = self._install_fake_adapter(bridge, [filtered, recovered])
+            result = query_model(
+                model_str="ignored",
+                prompt="Scientific Goal: evaluate a MAPF planner.",
+                system_prompt="plan formulation ```PLAN\\n...```",
+            )
+
+        self.assertEqual(result, "recovered")
         self.assertEqual(len(requests), 2)
-        self.assertEqual(bridge.provider_calls, 2)
-        self.assertEqual(bridge.input_tokens, 10)
+        self.assertEqual(bridge.input_tokens, 26)
+        self.assertEqual(bridge.output_tokens, 2)
+
+    def test_unfiltered_empty_response_is_not_accepted(self):
+        empty = self._response("", 13, 0)
+        empty.choices[0].finish_reason = "stop"
+
+        with tempfile.TemporaryDirectory() as raw:
+            bridge = self._bridge(Path(raw))
+            query_model, requests = self._install_fake_adapter(bridge, [empty])
+            with self.assertRaisesRegex(RuntimeError, "empty completion"):
+                query_model(model_str="ignored", prompt="task", system_prompt="role")
+
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(bridge.provider_calls, 1)
+        self.assertEqual(bridge.input_tokens, 13)
 
     def test_bad_request_is_terminal_after_one_invocation(self):
         class ProviderValidationError(Exception):

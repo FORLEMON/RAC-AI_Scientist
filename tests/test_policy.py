@@ -81,7 +81,24 @@ class PolicyTests(unittest.TestCase):
         self.assertIs(evaluated.action, Action.REVERIFY)
         self.assertIn("mark failed", evaluated.reason)
 
-    def test_r2_timeout_keeps_existing_terminal_behavior(self):
+    def test_r2_continuable_timeout_marks_native_step_failed_without_stopping_episode(self):
+        policy = SharedPolicy(Condition.R2)
+        cp = checkpoint([Issue("I-1", "experiment", "missing baseline")])
+        decision = policy.decide(cp)
+        result = InvocationResult(
+            "run",
+            "",
+            (),
+            (),
+            Usage(),
+            timed_out=True,
+            metrics={"native_timeout_continuable": 1.0},
+        )
+        evaluated = policy.evaluate(cp, decision, result)
+        self.assertIs(evaluated.action, Action.REVERIFY)
+        self.assertIn("next capability", evaluated.reason)
+
+    def test_r2_timeout_without_native_continue_marker_still_stops(self):
         policy = SharedPolicy(Condition.R2)
         cp = checkpoint([Issue("I-1", "experiment", "missing baseline")])
         decision = policy.decide(cp)

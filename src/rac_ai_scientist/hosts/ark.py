@@ -413,8 +413,15 @@ class ArkBridge(HostBridge):
         self._publish_disposition(False, evaluation.reason, result.proposed_next)
 
     def fail_invocation(self, result: InvocationResult, evaluation: CoordinationDecision) -> None:
-        """Mirror native ARK: mark an empty timed-out step failed and continue."""
-        if not result.timed_out or self.condition is not Condition.R1:
+        """Mark an empty timed-out ARK step failed and continue its lifecycle.
+
+        R1 keeps the fixed native order. R2 records the same failure and exposes
+        the successor as the next native requirement so shared runtime routing
+        can select it instead of terminating the episode or immediately
+        repeating the timed-out capability. R3 timeouts remain advisory and are
+        accepted by the runner's verifier path, so they do not arrive here.
+        """
+        if not result.timed_out or self.condition not in {Condition.R1, Condition.R2}:
             self.reject_invocation(result, evaluation)
             return
 
