@@ -76,43 +76,142 @@ def _is_content_filter_error(exc: Exception) -> bool:
     )
 
 
-def _content_filter_retry_messages(system_prompt: str, prompt: str) -> list[dict[str, str]]:
-    """Retry a filtered academic step with a short, neutral workflow envelope.
-
-    Repeating the full instruction-heavy system prompt can itself trip an Azure
-    classifier.  The retry therefore retains the scientific context and the
-    workflow's fenced response labels, but does not echo the original system
-    prompt or add meta-security language.
-    """
+def _workflow_labels(system_prompt: str) -> list[str]:
+    """Return the small set of workflow labels understood by Agent Laboratory."""
     known_labels = {
         "ADD_PAPER", "DIALOGUE", "EDIT", "EXPIRATION", "FULL_TEXT",
         "INTERPRETATION", "LATEX", "PLAN", "REPLACE", "SCORE",
         "SEARCH_HF", "SUBMIT_CODE", "SUMMARY", "python",
     }
-    labels = []
+    labels: list[str] = []
     for label in re.findall(r"```\s*([A-Za-z][A-Za-z0-9_-]*)", system_prompt):
         if label in known_labels and label not in labels:
             labels.append(label)
-    protocol = ", ".join(labels) if labels else "the format requested by the workflow"
+    return labels
+
+
+def _retry_phase(system_prompt: str, prompt: str) -> str:
+    combined = f"{system_prompt}\n{prompt}".lower().replace("_", " ")
+    for phase in NATIVE_NAMES.values():
+        if phase in combined:
+            return phase
+    return "scientific analysis"
+
+
+def _scientific_retry_context(prompt: str, *, compact: bool) -> dict[str, str]:
+    """Extract evidence-bearing prose without replaying instruction scaffolding."""
+    cleaned = re.sub(r"```\s*[A-Za-z][A-Za-z0-9_-]*", "\n", prompt)
+    cleaned = cleaned.replace("```", "\n")
+    chunks = re.split(r"\n{2,}|(?<=[.!?])\s+(?=[A-Z0-9])", cleaned)
+    control = re.compile(
+        r"\b(?:must|exactly|only|command|system prompt|developer message|"
+        r"ignore|disregard|override|jailbreak|role[- ]?play)\b",
+        re.IGNORECASE,
+    )
+    role_prefix = re.compile(
+        r"^(?:professor|postdoc|phd student|ml engineer|software engineer|assistant|user)\s*:\s*",
+        re.IGNORECASE,
+    )
+    categories = {
+        "objective": ("objective", "research topic", "scientific goal", "task", "problem", "develop"),
+        "literature": ("literature", "paper", "study", "finding", "abstract", "related work", "prior work"),
+        "data": ("data", "dataset", "input", "file", "sample", "measurement", "benchmark"),
+    }
+    selected: dict[str, list[str]] = {name: [] for name in categories}
+    fallback: list[str] = []
+    seen: set[str] = set()
+    for raw in chunks:
+        text = role_prefix.sub("", " ".join(raw.split())).strip(" -:\t")
+        if len(text) < 12 or control.search(text):
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        fallback.append(text)
+        lowered = text.lower()
+        for name, keywords in categories.items():
+            if any(keyword in lowered for keyword in keywords):
+                selected[name].append(text)
+
+    limits = (
+        {"objective": 1200, "literature": 0, "data": 700}
+        if compact
+        else {"objective": 2200, "literature": 2200, "data": 1600}
+    )
+    result: dict[str, str] = {}
+    for name, limit in limits.items():
+        if not limit:
+            continue
+        items = selected[name]
+        if not items and name == "objective":
+            items = fallback[:2]
+        value = "\n".join(items)
+        if value:
+            result[name] = value[:limit]
+    return result
+
+
+def _content_filter_retry_messages(
+    system_prompt: str,
+    prompt: str,
+    *,
+    level: int = 1,
+) -> list[dict[str, str]]:
+    """Build a fresh, bounded retry thread without replaying the raw prompt."""
+    if level not in {1, 2}:
+        raise ValueError(f"unsupported content-filter retry level: {level}")
+    labels = _workflow_labels(system_prompt)
+    label = labels[0] if labels else "SUMMARY"
+    phase = _retry_phase(system_prompt, prompt)
+    sections = _scientific_retry_context(prompt, compact=level == 2)
+    rendered = []
+    for name in ("objective", "literature", "data"):
+        value = sections.get(name)
+        if value:
+            rendered.append(f"{name.title()}:\n{value}")
+    context = "\n\n".join(rendered) or "Objective:\nContinue the current scientific task."
+    if level == 1:
+        system = f"Scientific research assistant working on {phase}. Use neutral academic prose."
+        request = (
+            f"{context}\n\nPrepare the next concise {phase} result.\n\n"
+            f"Format:\n```{label}\n<scientific content>\n```"
+        )
+    else:
+        system = "Scientific research assistant."
+        request = (
+            f"{context}\n\nDraft the next short scientific result.\n\n"
+            f"Format:\n```{label}\n<scientific content>\n```"
+        )
     return [
-        {
-            "role": "system",
-            "content": (
-                "Academic workflow continuation. Complete the current research step "
-                "concisely from the supplied context. Return exactly one fenced workflow "
-                f"response. Available response labels: {protocol}."
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                "Continue this academic research step using the same objective, data, history, "
-                "and technical context:\n\n"
-                f"<workflow_context>\n{prompt}\n</workflow_context>\n\n"
-                "Produce the next concise workflow response."
-            ),
-        },
+        {"role": "system", "content": system},
+        {"role": "user", "content": request},
     ]
+
+
+class _FilteredCompletionError(RuntimeError):
+    status_code = 400
+
+    def __init__(self, response: Any):
+        super().__init__("content_filter: provider returned an empty filtered completion")
+        self.usage = getattr(response, "usage", None)
+
+
+class _EmptyCompletionError(RuntimeError):
+    def __init__(self, response: Any):
+        super().__init__("provider returned an empty completion")
+        self.usage = getattr(response, "usage", None)
+
+
+def _completion_text(response: Any) -> str:
+    choice = response.choices[0]
+    content = choice.message.content or ""
+    finish_reason = str(getattr(choice, "finish_reason", "") or "").lower()
+    if finish_reason == "content_filter":
+        raise _FilteredCompletionError(response)
+    if not content.strip():
+        raise _EmptyCompletionError(response)
+    return content
 
 
 def _usage_counts(source: Any) -> tuple[int, int]:
@@ -802,7 +901,8 @@ class AgentLaboratoryBridge(HostBridge):
             if temp is not None:
                 request["temperature"] = temp
             response = None
-            for attempt in range(2):
+            content = None
+            for attempt in range(3):
                 if self.provider_calls >= self.initial_budget.agent_calls:
                     raise RuntimeError("lifecycle agent-call budget exhausted")
                 if time.monotonic() - self.started >= self.initial_budget.wall_seconds:
@@ -813,20 +913,28 @@ class AgentLaboratoryBridge(HostBridge):
                 self.provider_calls += 1
                 try:
                     response = client.chat.completions.create(**request)
+                    content = _completion_text(response)
                 except Exception as exc:
                     prompt_tokens, completion_tokens = _usage_counts(exc)
                     self.input_tokens += prompt_tokens
                     self.output_tokens += completion_tokens
-                    if attempt == 0 and _is_content_filter_error(exc):
+                    if attempt < 2 and _is_content_filter_error(exc):
+                        retry_level = attempt + 1
                         print(
-                            "[RAC] provider-filter retry with neutral academic workflow envelope",
+                            f"[RAC] provider-filter retry level {retry_level} "
+                            "with reduced scientific context",
                             file=sys.stderr,
                         )
-                        request["messages"] = _content_filter_retry_messages(system_prompt, prompt)
+                        request["messages"] = _content_filter_retry_messages(
+                            system_prompt,
+                            prompt,
+                            level=retry_level,
+                        )
                         continue
                     raise
                 break
             assert response is not None
+            assert content is not None
             prompt_tokens, completion_tokens = _usage_counts(response)
             self.input_tokens += prompt_tokens
             self.output_tokens += completion_tokens
@@ -835,7 +943,7 @@ class AgentLaboratoryBridge(HostBridge):
                 self.cost_is_provider_reported = False
             else:
                 self.provider_cost_usd += cost
-            return response.choices[0].message.content or ""
+            return content
 
         for module in (inference, agents, mlesolver, papersolver, ai_lab_repo):
             if hasattr(module, "query_model"):

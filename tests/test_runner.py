@@ -152,6 +152,76 @@ class RunnerTests(unittest.TestCase):
             self.assertFalse((root / "outputs" / "partial.json").exists())
             self.assertTrue((root / "state" / "failures.jsonl").is_file())
 
+    def test_r2_rolls_back_continuable_timeout_and_reroutes(self):
+        class TimeoutBridge(HostBridge):
+            host_id = "timeout"
+
+            def __init__(self, workspace):
+                self.workspace = workspace
+                self.stage = "run"
+                self.invoked = []
+                self.failures = []
+
+            def initialize(self, **kwargs):
+                pass
+
+            def checkpoint(self):
+                cards = [
+                    CapabilityCard("run", "experiment", ("experiment",), (), ("outputs/**",), ("result",)),
+                    CapabilityCard("write", "write", ("writing",), (), ("report/**",), ("terminal_report",)),
+                ]
+                return Checkpoint(
+                    "ep",
+                    len(self.invoked),
+                    "finish",
+                    self.stage,
+                    snapshot_workspace(self.workspace),
+                    [Issue(f"native:{self.stage}", "native_requirement", f"{self.stage} remains")],
+                    Budget(10, 10000, 10000, 10, 100, 10),
+                    cards,
+                )
+
+            def native_next(self, checkpoint):
+                return self.stage
+
+            def transaction_workspace(self):
+                return self.workspace
+
+            def invoke(self, capability_id, contract):
+                self.invoked.append(capability_id)
+                before = snapshot_workspace(self.workspace)
+                if capability_id == "run":
+                    partial = self.workspace / "outputs" / "partial.json"
+                    partial.parent.mkdir(parents=True, exist_ok=True)
+                    partial.write_text("partial", encoding="utf-8")
+                    return InvocationResult(
+                        capability_id,
+                        "",
+                        before,
+                        snapshot_workspace(self.workspace),
+                        timed_out=True,
+                        metrics={"native_timeout_continuable": 1.0},
+                    )
+                return InvocationResult(capability_id, "report complete", before, before, proposed_done=True)
+
+            def fail_invocation(self, result, evaluation):
+                self.failures.append(result.capability_id)
+                marker = self.workspace / "state" / "failures.jsonl"
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text('{"capability_id":"run","status":"failed"}\n', encoding="utf-8")
+                self.stage = "write"
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            bridge = TimeoutBridge(root)
+            outcome = EpisodeRunner(bridge, "R2", JsonlLedger(root / "trace.jsonl")).run(hard_hop_limit=3)
+
+            self.assertEqual(outcome.status, "completed")
+            self.assertEqual(bridge.invoked, ["run", "write"])
+            self.assertEqual(bridge.failures, ["run"])
+            self.assertFalse((root / "outputs" / "partial.json").exists())
+            self.assertTrue((root / "state" / "failures.jsonl").is_file())
+
     def test_provider_http_402_is_a_terminal_budget_result(self):
         class BudgetRejectedBridge(FakeBridge):
             def invoke(self, capability_id, contract):

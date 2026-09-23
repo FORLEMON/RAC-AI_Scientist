@@ -72,13 +72,13 @@ class SharedPolicy:
         if not self.condition.enables("verifier"):
             if (
                 result.timed_out
-                and self.condition is Condition.R1
+                and self.condition in {Condition.R1, Condition.R2}
                 and result.metrics.get("native_timeout_continuable") == 1.0
             ):
                 return CoordinationDecision(
                     Action.REVERIFY,
                     None,
-                    "native capability timed out; mark failed and continue the fixed workflow",
+                    "native capability timed out; mark failed and continue with the next capability",
                 )
             if result.error or result.timed_out:
                 return CoordinationDecision(Action.STOP, None, result.error or "capability timed out")
