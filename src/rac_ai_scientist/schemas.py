@@ -45,6 +45,7 @@ class EvidenceRequirement:
         "artifact_exists",
         "nonempty_output",
         "terminal_report",
+        "benchmark_submission",
     ]
     artifact_kinds: tuple[str, ...] = ()
     minimum_bytes: int = 1

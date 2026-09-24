@@ -35,6 +35,15 @@ results/
 prepared_tasks/
 *.log
 
+# Temporary tooling and expanded copies of the published experiment archive.
+/tmp/
+/output/discoverybench-all-results/batches/
+/output/discoverybench-results/*
+!/output/discoverybench-results/summary.zh-CN.md
+!/output/discoverybench-results/results.json
+!/output/discoverybench-results/results.csv
+!/output/discoverybench-results/validation.json
+
 # Editors / OS
 .DS_Store
 Thumbs.db

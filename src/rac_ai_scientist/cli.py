@@ -17,8 +17,10 @@ from .matrix import expand_matrix
 from .runner import EpisodeRunner
 from .sharednet import SharedNetInvite, load_sharednet_env
 from .schemas import Budget, to_jsonable
-from .provenance import tree_hash
+from .provenance import expected_tree_hash, tree_hash
 from .hosts.registry import HOST_IDS, SHAREDNET_HOST_IDS, local_snapshot_name, make_bridge
+from .benchmarks import BENCHMARK_IDS, get_adapter, load_prepared, copy_prepared
+from .benchmarks.base import digest, write_json, relative_path
 
 
 def _uses_host_native_n0(host: str, condition: str) -> bool:
@@ -75,7 +77,12 @@ def _plan(args: argparse.Namespace) -> int:
 
 
 def _check_workspace(args: argparse.Namespace) -> int:
-    assert_no_target_study(Path(args.workspace).resolve())
+    workspace = Path(args.workspace).resolve()
+    if (workspace / "task_spec.json").is_file():
+        spec = load_prepared(workspace)
+        print(f"[OK] {spec.benchmark_id} prepared public inputs and hashes verified")
+        return 0
+    assert_no_target_study(workspace)
     print("[OK] no ResearchClawBench target_study material is visible")
     return 0
 
@@ -85,6 +92,23 @@ def _prepare_task(args: argparse.Namespace) -> int:
     destination = Path(args.output).resolve()
     if destination.exists():
         raise FileExistsError(f"prepared task already exists: {destination}")
+    benchmark_id = getattr(args, "benchmark_id", "researchclawbench")
+    if benchmark_id != "researchclawbench":
+        from .benchmarks.upstream import assert_revision
+        assert_revision(source, benchmark_id)
+        if not args.task_id or not args.split:
+            raise ValueError("new benchmarks require --task-id and --split")
+        if benchmark_id == "corebench" and (not args.dataset or not args.capsules):
+            raise ValueError("CORE preparation requires --dataset and --capsules")
+        import tempfile
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".rac-prepare-", dir=destination.parent) as staging:
+            bundle = Path(staging) / "bundle"
+            spec = get_adapter(benchmark_id).prepare(source, bundle, task_id=args.task_id,
+                split=args.split, dataset=args.dataset, capsules=args.capsules)
+            bundle.rename(destination)
+        print(json.dumps({"prepared_task": str(destination), "task": spec.to_dict()}, indent=2, ensure_ascii=False))
+        return 0
     materialize_rcb_workspace(source, destination)
     assert_no_target_study(destination)
     print(json.dumps({"prepared_task": str(destination), "source_task": source.name}, indent=2))
@@ -130,6 +154,13 @@ def _score_episode(args: argparse.Namespace) -> int:
     if not metadata_path.is_file():
         raise FileNotFoundError(f"missing episode metadata: {metadata_path}")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if metadata.get("benchmark_id", "researchclawbench") != "researchclawbench":
+        from .benchmarks.episode import score_episode
+        code = score_episode(episode_dir, Path(args.benchmark).resolve(),
+            dataset=Path(args.dataset).resolve() if getattr(args, "dataset", None) else None,
+            timeout=getattr(args, "score_timeout", 1800))
+        print((episode_dir / "score.json").read_text(encoding="utf-8"))
+        return code
     score_path = episode_dir / "score.json"
     task_id = metadata.get("task_id")
     try:
@@ -189,6 +220,25 @@ def _selected_upstream(root: Path, host: str, explicit: str | None) -> Path:
     return _resolve_upstream(root, host)
 
 
+def _empty_external_workspace(episode_dir: Path, host: str, runtime_url: str | None) -> bool:
+    """Accept only a pristine runtime workspace, including ARK's empty volume.
+
+    Docker creates the nested mount point before run-one starts. Existing
+    artifacts, ordinary directories and symlinks must still block a rerun.
+    """
+    workspace = episode_dir / "workspace"
+    if (not runtime_url or not episode_dir.is_dir() or workspace.is_symlink()
+            or set(p.name for p in episode_dir.iterdir()) != {"workspace"}
+            or not workspace.is_dir()):
+        return False
+    entries = list(workspace.iterdir())
+    if not entries:
+        return True
+    conda = workspace / ".conda_env"
+    return (host == "ark" and entries == [conda] and not conda.is_symlink()
+            and conda.is_dir() and conda.is_mount() and not any(conda.iterdir()))
+
+
 def _run_one(args: argparse.Namespace) -> int:
     root = Path(args.project_root).resolve()
     task_dir = Path(args.task_dir).resolve()
@@ -210,15 +260,26 @@ def _run_one(args: argparse.Namespace) -> int:
         raise ValueError("all lifecycle budget limits must be positive")
     manifest = root / "configs" / "hosts" / f"{args.host}.json"
     upstream = _selected_upstream(root, args.host, args.upstream)
+    task_spec = load_prepared(task_dir) if (task_dir / "task_spec.json").is_file() else None
     info_path = task_dir / "task_info.json"
-    if not info_path.is_file():
+    if task_spec is None and not info_path.is_file():
         raise FileNotFoundError(f"missing ResearchClawBench task_info.json: {info_path}")
-    preview = json.loads(info_path.read_text(encoding="utf-8"))
+    preview = ({"task_id": task_spec.task_id, "task": task_spec.objective} if task_spec else
+               json.loads(info_path.read_text(encoding="utf-8")))
     task_id = str(preview.get("task_id") or task_dir.name)
-    episode_id = args.episode_id or f"{task_id}_{args.host}_{args.condition}_s{args.seed}_{time.strftime('%Y%m%d_%H%M%S')}"
+    identity = f"{task_spec.benchmark_id}_{task_spec.split}_{task_id}" if task_spec else task_id
+    identity = identity.replace("/", "_")
+    episode_id = args.episode_id or f"{identity}_{args.host}_{args.condition}_s{args.seed}_{time.strftime('%Y%m%d_%H%M%S')}"
+    if relative_path(episode_id) != episode_id or "/" in episode_id:
+        raise ValueError("episode-id must be one safe path component")
     episode_dir = run_root / episode_id
     workspace = episode_dir / "workspace"
-    if episode_dir.exists():
+    runtime_url = getattr(args, "runtime_url", None) or os.environ.get("RAC_TASK_RUNTIME_URL")
+    runtime_image = getattr(args, "runtime_image", None)
+    if runtime_url and runtime_image:
+        raise ValueError("choose --runtime-url or --runtime-image")
+    empty_external_workspace = _empty_external_workspace(episode_dir, args.host, runtime_url)
+    if episode_dir.exists() and not empty_external_workspace:
         raise FileExistsError(f"episode directory already exists: {episode_dir}")
     objective = str(preview.get("task", "")).strip()
     if not objective:
@@ -259,11 +320,20 @@ def _run_one(args: argparse.Namespace) -> int:
         os.environ["SHAREDNET_ROOM_ID"] = sharednet_room_id
         os.environ["SHAREDNET_INVITE"] = invite_text
         os.environ["SHAREDNET_BASE_URL"] = sharednet_base_url
-    episode_dir.mkdir(parents=True)
-    materialize_rcb_workspace(task_dir, workspace)
-    assert_no_target_study(workspace)
+    if task_spec and task_spec.benchmark_id == "corebench" and not (runtime_url or runtime_image):
+        raise ValueError("CORE Hard requires an isolated task runtime (--runtime-url or --runtime-image)")
+    episode_dir.mkdir(parents=True, exist_ok=bool(empty_external_workspace))
+    if task_spec:
+        copy_prepared(task_dir, workspace, allow_empty=bool(empty_external_workspace),
+                      allow_empty_mounts=(".conda_env",) if args.host == "ark" and runtime_url else ())
+        write_json(episode_dir / "task_spec.json", task_spec.to_dict())
+        objective = task_spec.instructions()
+    else:
+        materialize_rcb_workspace(task_dir, workspace)
+        assert_no_target_study(workspace)
     bridge = make_bridge(args.host, upstream, manifest, budget, model, api_key)
     bridge.configure_condition(condition)
+    bridge.configure_task(task_spec)
     host_native_n0 = _uses_host_native_n0(args.host, args.condition)
     execution_mode = "host_native" if host_native_n0 else (
         "sharednet_rac_episode_runner"
@@ -297,6 +367,14 @@ def _run_one(args: argparse.Namespace) -> int:
         "status": "initializing",
         "execution_mode": execution_mode,
     }
+    if task_spec:
+        metadata.update(benchmark_id=task_spec.benchmark_id, split=task_spec.split, profile=task_spec.profile,
+                        benchmark_revision=task_spec.source_revision, task_spec_sha256=digest(episode_dir / "task_spec.json"),
+                        submission_status="pending", scoring_status="not_requested")
+        run_config.update(benchmark_id=task_spec.benchmark_id, split=task_spec.split, profile=task_spec.profile,
+                          task_spec_sha256=metadata["task_spec_sha256"])
+        metadata["run_config_sha256"] = config_hash(run_config)
+        metadata["integration_tree_sha256"] = tree_hash(Path(__file__).parent)[0]
     if sharednet_room_id:
         metadata["communication"] = {"backend": "sharednet", "room_id": sharednet_room_id}
     metadata_path = episode_dir / "episode.json"
@@ -309,12 +387,9 @@ def _run_one(args: argparse.Namespace) -> int:
         local_snapshot = root / spec.get("local_snapshot", "")
         configured_host_root = os.environ.get("RAC_HOST_ROOT")
         packaged_host_root = Path(configured_host_root).resolve() if configured_host_root else None
-        if packaged_host_root is not None and upstream == packaged_host_root and spec.get("runtime_tree_sha256"):
-            expected_tree = spec["runtime_tree_sha256"]
-        elif upstream == local_snapshot.resolve() and spec.get("snapshot_tree_sha256"):
-            expected_tree = spec["snapshot_tree_sha256"]
-        else:
-            expected_tree = spec.get("tree_sha256")
+        expected_tree = expected_tree_hash(spec, actual_tree,
+            packaged=packaged_host_root is not None and upstream == packaged_host_root,
+            snapshot=upstream == local_snapshot.resolve())
         source_mismatch = bool(expected_tree and actual_tree != expected_tree)
         metadata["upstream"] = {
             "revision": spec.get("revision"),
@@ -324,9 +399,26 @@ def _run_one(args: argparse.Namespace) -> int:
             "byte_count": byte_count,
         }
     metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    runtime_owner = None
     try:
         if source_mismatch:
             raise ValueError(f"{args.host} checkout does not match upstream.lock.json")
+        if runtime_image or runtime_url:
+            from .task_runtime import DockerTaskRuntime, RuntimeClient
+            if runtime_image:
+                runtime_owner = DockerTaskRuntime(workspace, runtime_image, episode_dir / "runtime",
+                                                 wall_seconds=args.max_wall_seconds)
+                runtime = runtime_owner.start()
+            else:
+                runtime = RuntimeClient(runtime_url, os.environ["RAC_TASK_RUNTIME_TOKEN"])
+            info = runtime.info()
+            if info.get("kind") != "docker" or info.get("workspace") != str(workspace):
+                raise ValueError("task runtime is not bound to this episode workspace")
+            if task_spec and task_spec.benchmark_id == "corebench" and info.get("bootstrap_only") is not True:
+                raise ValueError("CORE runtime did not attest a clean bootstrap-only Python environment")
+            metadata["task_runtime"] = runtime.request("begin", {"episode_id": episode_id,
+                "task_spec_sha256": metadata.get("task_spec_sha256"), "wall_seconds": args.max_wall_seconds})
+            bridge.configure_task(task_spec, runtime)
         initializer = bridge.initialize_native if host_native_n0 else bridge.initialize
         initializer(episode_id=episode_id, workspace=workspace, objective=objective, seed=args.seed)
         if uses_sharednet:
@@ -357,7 +449,11 @@ def _run_one(args: argparse.Namespace) -> int:
         metadata.update({"status": "failed", "error_type": type(exc).__name__, "reason": str(exc)})
         raise
     finally:
+        if task_spec:
+            metadata["submission_status"] = "valid" if bridge.submission_valid() else "invalid"
         metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+        if runtime_owner:
+            runtime_owner.close()
     print(json.dumps(metadata, indent=2, ensure_ascii=False))
     return 0 if outcome.status in {"completed", "stop"} else 2
 
@@ -426,6 +522,11 @@ def build_parser() -> argparse.ArgumentParser:
     prepare = sub.add_parser("prepare-task", help="create a host-safe task bundle without target_study")
     prepare.add_argument("--task-dir", required=True)
     prepare.add_argument("--output", required=True)
+    prepare.add_argument("--benchmark-id", choices=BENCHMARK_IDS, default="researchclawbench")
+    prepare.add_argument("--task-id")
+    prepare.add_argument("--split")
+    prepare.add_argument("--dataset", help="private CORE reference JSON; never copied into workspace")
+    prepare.add_argument("--capsules", help="directory containing unpacked CORE capsules")
     prepare.set_defaults(func=_prepare_task)
     run = sub.add_parser("run-one", help="run one host/condition/task episode")
     run.add_argument("--project-root", default=str(Path(__file__).resolve().parents[2]))
@@ -438,6 +539,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--run-root", default="runs")
     run.add_argument("--episode-id")
     run.add_argument("--model")
+    run.add_argument("--runtime-image", help="Linux controller: frozen minimal image name@sha256:...")
+    run.add_argument("--runtime-url", help="host container: controller task-runtime endpoint")
     run.add_argument("--seed", type=int, default=0)
     run.add_argument("--max-cost-usd", type=float, required=True)
     run.add_argument("--max-input-tokens", type=int, required=True)
@@ -459,6 +562,8 @@ def build_parser() -> argparse.ArgumentParser:
     score = sub.add_parser("score-episode", help="score a finished episode outside the evaluated host")
     score.add_argument("--episode-dir", required=True)
     score.add_argument("--benchmark", required=True)
+    score.add_argument("--dataset", help="private CORE reference JSON")
+    score.add_argument("--score-timeout", type=float, default=1800)
     score.set_defaults(func=_score_episode)
     return parser
 

@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import warnings
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -177,6 +178,8 @@ class RoomClient:
         headers = {"authorization": f"Bearer {auth}"}
         if body is not None:
             headers["content-type"] = "application/json"
+        if method == "POST" and path.endswith("/messages"):
+            headers["idempotency-key"] = str(uuid.uuid4())
         status, payload = self._transport(method, f"{self.base_url}{path}", headers, body, timeout)
         if status >= 400:
             error = (payload or {}).get("error") or {}
@@ -184,6 +187,10 @@ class RoomClient:
         return payload
 
     def join(self, invite_token: str, name: str) -> list[RoomMessage]:
+        # Matrix episode ids can exceed the API's display-name limit. Keep a
+        # readable prefix and stable collision-resistant identity per role.
+        if len(name) > 48:
+            name = name[:35] + ":" + hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
         payload = self._call(
             "POST",
             f"/api/v1/rooms/{self.room_id}/join",

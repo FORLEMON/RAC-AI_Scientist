@@ -476,9 +476,10 @@ def _install_hf_data_search(workspace: Path) -> None:
 
     data = workspace / "data"
     paths = sorted(path.relative_to(workspace).as_posix() for path in data.iterdir()) if data.is_dir() else []
+    task_file = "INSTRUCTIONS.md" if (workspace / "task_spec.json").is_file() else "task.json"
     notice = (
         "External Hugging Face dataset search is disabled for this benchmark. "
-        "Read task.json and use only the supplied local data paths: "
+        f"Read {task_file} and use only the supplied local data paths: "
         + ", ".join(repr(path) for path in paths)
     )
 
@@ -581,6 +582,9 @@ class AgentLaboratoryBridge(HostBridge):
             _install_report_writing_scope()
             _install_edit_range_validation()
             self._install_model_adapter()
+            if getattr(self, "task_runtime", None):
+                from ..task_runtime.hooks import install_agent_laboratory
+                install_agent_laboratory(self.task_runtime)
 
             models = {native: self.model for native in NATIVE_NAMES.values()}
             models["paper refinement"] = self.model
@@ -660,6 +664,8 @@ class AgentLaboratoryBridge(HostBridge):
             os.chdir(previous)
         report = self.workspace / "report" / "report.md"
         complete = report.is_file() and bool(report.read_text(encoding="utf-8", errors="replace").strip())
+        if self.benchmark_instructions():
+            complete = self.submission_valid()
         if failure is not None:
             status = "failed"
             reason = f"{type(failure).__name__}: {failure}"
@@ -669,9 +675,9 @@ class AgentLaboratoryBridge(HostBridge):
             reason = (
                 "Agent Laboratory native workflow completed"
                 if complete
-                else "Agent Laboratory returned without a report"
+                else "Agent Laboratory returned without a valid benchmark submission"
             )
-            native_status = "completed" if complete else "missing_report"
+            native_status = "completed" if complete else ("missing_submission" if self.benchmark_instructions() else "missing_report")
         return NativeRunResult(
             status=status,
             reason=reason,
@@ -692,6 +698,8 @@ class AgentLaboratoryBridge(HostBridge):
 
     def _benchmark_note(self) -> str:
         assert self.workspace is not None
+        if self.benchmark_instructions():
+            return self.benchmark_instructions() + "\nSave JSON submissions by executing code in the task runtime."
         return (
             f"Work only inside {self.workspace}. Use the supplied data/ and related_work/. "
             "When related_work contains PDFs, use those supplied papers before any external literature search; "

@@ -14,6 +14,7 @@ class ArkInvocationContractTests(unittest.TestCase):
     def make_bridge(self, root, run_agent):
         manifest = Path(__file__).parents[1] / "configs/hosts/ark.json"
         bridge = ArkBridge(root, manifest, Budget(25, 10000, 10000, 10, 100, 10), "fake", "FAKE")
+        self.assertEqual(bridge.model, "openai/fake")
         bridge.workspace = root
         bridge.started = time.monotonic()
         bridge.orchestrator = types.SimpleNamespace(run_agent=run_agent, _terminal_error=None, _agent_stats=[])

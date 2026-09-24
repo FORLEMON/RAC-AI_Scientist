@@ -6,6 +6,17 @@ Laboratory, and EvoScientist—and evaluating them on ResearchClawBench. Earlier
 data-to-paper, AI-Researcher, and AutoResearchClaw integrations remain for
 historical reproducibility but are excluded from new experiments.
 
+DiscoveryBench (real, no domain knowledge) and CORE-Bench (HAL Hard, CPU)
+adapters are also available. They add sanitized task bundles, JSON submissions,
+private scoring workers, and an isolated task execution runtime. See the
+[Chinese setup and acceptance runbook](docs/benchmark-adapters.zh-CN.md) and
+`benchmark.lock.json`. Local Docker environments and native execution hooks have
+offline acceptance checks; real model-driven benchmark episodes still require
+validation. Existing ResearchClawBench commands remain the default.
+
+Windows users: see [the local WSL2/Docker environment guide](docs/local-host-environments.zh-CN.md)
+for the three installed host environments and the `scripts/hosts.ps1` launcher.
+
 The repository deliberately keeps upstream projects separate. The integration
 package owns the shared N0–R3 policy, schemas, accounting, host bridges, and
 experiment runner. A host bridge may serialize native state, invoke an existing
@@ -122,6 +133,9 @@ python3 scripts/bootstrap.py \
   --only agent_laboratory \
   --only evo_scientist \
   --only researchclawbench
+
+python3 scripts/bootstrap_host_archives.py  # verifies active hosts and fetches pinned PaperBanana
+python3 scripts/cache_host_models.py       # MiniLM, tiktoken and verified Miniforge installer
 
 PYTHONPATH=src python3 -m rac_ai_scientist.cli verify-upstreams \
   --only ark \
@@ -358,3 +372,11 @@ already implements mechanisms it explicitly does not.
 
 See `docs/architecture.md` for the implementation boundary and staged delivery
 plan.
+
+## Experiment data
+
+The September 2026 DiscoveryBench results, sanitized logs, analysis artifacts,
+and scoring audit are indexed in [output/README.zh-CN.md](output/README.zh-CN.md).
+The complete archive retains failed, interrupted, cancelled, and unstarted
+records separately from scored submissions. These are single-task, seed-0 smoke
+tests, not a benchmark-wide comparison.

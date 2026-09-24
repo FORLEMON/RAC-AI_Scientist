@@ -1,0 +1,12 @@
+ARG PYTHON_IMAGE=public.ecr.aws/docker/library/python:3.11-slim
+FROM ${PYTHON_IMAGE}
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+COPY pyproject.toml README.md LICENSE /opt/integration/
+COPY src /opt/integration/src
+RUN python -m pip install --no-cache-dir '/opt/integration[benchmark-scoring]'
+WORKDIR /opt/integration
+ENTRYPOINT ["rac-ai-scientist"]
+# Mount the frozen benchmark checkout and reference JSON only into this image.
+CMD ["--help"]

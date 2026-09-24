@@ -136,6 +136,9 @@ class EvoScientistBridge(HostBridge):
             sys.path.insert(0, str(self.upstream))
         from EvoScientist.config import EvoScientistConfig
         from EvoScientist.llm import get_chat_model
+        if getattr(self, "task_runtime", None):
+            from ..task_runtime.hooks import install_evo_scientist
+            install_evo_scientist(self.task_runtime)
 
         base_url = os.environ.get("AGENT_API_BASE", "https://api.openai.com/v1")
         cfg = EvoScientistConfig(
@@ -200,6 +203,11 @@ class EvoScientistBridge(HostBridge):
             "to report/report.md. Never access or infer a "
             f"hidden target study.\n\nObjective:\n{self.objective}"
         )
+        rubric = NATIVE_DELIVERY_RUBRIC
+        if self.benchmark_instructions():
+            prompt = "Complete this task using your full native workflow:\n" + self.benchmark_instructions()
+            retry_prompt = prompt
+            rubric = self.benchmark_instructions()
         outputs: list[str] = []
         native_iterations = 0
         complete = False
@@ -207,7 +215,7 @@ class EvoScientistBridge(HostBridge):
             active_prompt = prompt if native_iterations == 1 else retry_prompt
             result = self._invoke_agent(
                 active_prompt,
-                rubric=NATIVE_DELIVERY_RUBRIC,
+                rubric=rubric,
                 retry_prompt=retry_prompt,
             )
             messages = result.get("messages", []) if isinstance(result, dict) else []
@@ -225,8 +233,8 @@ class EvoScientistBridge(HostBridge):
             reason = "EvoScientist native rubric-guided deep-agent run completed"
             native_status = "completed"
         else:
-            reason = "EvoScientist native rubric loop returned without report/report.md"
-            native_status = "missing_report"
+            reason = "EvoScientist native rubric loop returned without a valid benchmark submission"
+            native_status = "missing_submission" if self.benchmark_instructions() else "missing_report"
         return NativeRunResult(
             status="completed" if complete else "stop",
             reason=reason,
@@ -250,6 +258,8 @@ class EvoScientistBridge(HostBridge):
 
     def _native_report_complete(self) -> bool:
         assert self.workspace is not None
+        if self.benchmark_instructions():
+            return self.submission_valid()
         report = self.workspace / "report" / "report.md"
         return report.is_file() and bool(
             report.read_text(encoding="utf-8", errors="replace").strip()
@@ -374,6 +384,8 @@ class EvoScientistBridge(HostBridge):
         base = render_contract_prompt(self.objective, capability_id, contract)
         if capability_id == "review":
             role = "Independently review report/report.md and persisted code/results. Return a numeric Score: X/10 and actionable findings. Do not revise it."
+            if self.benchmark_instructions():
+                role = f"Independently review {self.task_spec.output_file} and persisted evidence. Return a numeric Score: X/10 and actionable findings. Do not revise it."
         else:
             role = f"Use EvoScientist's native {SUBAGENTS[capability_id]} for this task."
         return base + "\n" + role + "\nNever access target_study. Work only in the current workspace."

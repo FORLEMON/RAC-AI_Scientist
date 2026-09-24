@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "experiment_id": "discoverybench_dev",
+  "benchmark": {"id": "discoverybench", "split": "train", "profile": "real-no-domain-knowledge"},
+  "hosts": ["ark", "agent_laboratory", "evo_scientist"],
+  "conditions": ["N0", "R1", "R2", "R3"],
+  "tasks": [],
+  "seeds": [0],
+  "repeats": 1,
+  "max_parallel_episodes": 1,
+  "model": {"name": "SET_ME", "api_key_env": "AGENT_API_KEY", "api_base_env": "AGENT_API_BASE"},
+  "judge": {"enabled": true, "name": "SET_ME", "api_key_env": "JUDGE_API_KEY"},
+  "budget": {"max_provider_cost_usd": 0, "max_input_tokens": 0, "max_output_tokens": 0, "max_agent_calls": 0, "max_wall_seconds": 0, "max_hops": 0},
+  "paths": {"benchmark": "upstreams/discoverybench", "prepared_tasks": "prepared_tasks", "upstream_root": "upstreams", "run_root": "runs"}
+}

@@ -14,6 +14,41 @@ class HostBridge(ABC):
 
     host_id: str
 
+    def configure_task(self, spec, runtime=None) -> None:
+        """The same benchmark IO contract applies to all four conditions."""
+        from dataclasses import replace
+        self.task_spec = spec
+        self.task_runtime = runtime
+        if spec is not None and spec.benchmark_id != "researchclawbench":
+            self.cards = [replace(card,
+                readable_artifacts=tuple(dict.fromkeys((*card.readable_artifacts, *spec.public_files, spec.output_file))),
+                writable_artifacts=tuple(dict.fromkeys((*card.writable_artifacts, spec.output_file))),
+                produces=tuple(dict.fromkeys((*card.produces, "terminal_submission")))
+                if "finalize" in card.tags else card.produces) for card in self.cards]
+
+    def benchmark_instructions(self) -> str:
+        spec = getattr(self, "task_spec", None)
+        if not spec or spec.benchmark_id == "researchclawbench":
+            return ""
+        instructions = spec.instructions()
+        if getattr(self, "task_runtime", None):
+            instructions += ("\nExecution uses a separate task container. Each tool command starts a new Bash shell "
+                "in the workspace; include cd and environment activation in each command. Files and installed "
+                "dependencies persist for this episode. Commands are synchronous; background processes are "
+                "terminated when a command finishes. Use a sufficient timeout and do not send interactive input.\n")
+        return instructions
+
+    def submission_valid(self) -> bool:
+        from .benchmarks import get_adapter
+        spec = getattr(self, "task_spec", None)
+        if spec is None or getattr(self, "workspace", None) is None:
+            return False
+        try:
+            get_adapter(spec.benchmark_id).read_submission(self.workspace, spec)
+            return True
+        except (ValueError, OSError):
+            return False
+
     def configure_condition(self, condition: Condition | str) -> None:
         """Configure an optional condition-specific runtime transport."""
         self.condition = Condition.parse(condition)
@@ -50,6 +85,8 @@ class HostBridge(ABC):
     ) -> str:
         """Publish a typed request and fold Room context into a native prompt."""
         sharednet = getattr(self, "sharednet", None)
+        if self.benchmark_instructions():
+            prompt += "\n\nBenchmark delivery requirements:\n" + self.benchmark_instructions()
         if sharednet is None:
             return prompt
         augmented = sharednet.request(

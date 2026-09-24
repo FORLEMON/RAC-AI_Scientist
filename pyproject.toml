@@ -11,6 +11,9 @@ requires-python = ">=3.10"
 license = {text = "MIT"}
 dependencies = ["openai>=1.0"]
 
+[project.optional-dependencies]
+benchmark-scoring = ["numpy==2.1.3", "scipy==1.14.1"]
+
 [project.scripts]
 rac-ai-scientist = "rac_ai_scientist.cli:main"
 

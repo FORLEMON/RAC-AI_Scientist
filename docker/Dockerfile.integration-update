@@ -1,0 +1,7 @@
+# Refresh only RAC code in an already built host image, preserving its packages.
+# For a clean installation, build the full per-host Dockerfile through Compose.
+ARG HOST_IMAGE
+FROM ${HOST_IMAGE}
+COPY src /opt/integration/src
+COPY configs /opt/integration/configs
+COPY upstream.lock.json benchmark.lock.json /opt/integration/

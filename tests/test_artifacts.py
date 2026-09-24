@@ -101,3 +101,16 @@ class ArtifactTests(unittest.TestCase):
 
             self.assertTrue((root / "outputs" / "partial.json").is_file())
             self.assertFalse((root / "outside.txt").exists())
+
+    def test_second_rollback_drops_artifacts_preserved_by_first_rollback(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "original.txt").write_text("before")
+            transaction = WorkspaceTransaction(root)
+            (root / "partial.txt").write_text("partial")
+            transaction.rollback(preserve_patterns=("partial.txt",))
+            self.assertTrue((root / "partial.txt").exists())
+            transaction.rollback()
+            self.assertFalse((root / "partial.txt").exists())
+            self.assertEqual((root / "original.txt").read_text(), "before")
+            transaction.close()

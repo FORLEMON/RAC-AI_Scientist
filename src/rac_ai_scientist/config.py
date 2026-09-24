@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -59,6 +60,33 @@ def validate_config(data: dict[str, Any], root: Path) -> list[DoctorFinding]:
         findings.append(DoctorFinding("BLOCKED", "evaluated model is not configured"))
 
     paths = data.get("paths", {})
+    from .benchmarks import BENCHMARK_IDS, load_prepared
+    from .benchmarks.base import relative_path
+    benchmark = data.get("benchmark", {"id": "researchclawbench"})
+    benchmark_id = benchmark.get("id")
+    if benchmark_id not in BENCHMARK_IDS:
+        findings.append(DoctorFinding("ERROR", f"unknown benchmark: {benchmark_id}"))
+    elif benchmark_id != "researchclawbench":
+        split = benchmark.get("split")
+        valid_splits = {"train", "test"} if benchmark_id == "discoverybench" else {"dev", "eval"}
+        if split not in valid_splits:
+            findings.append(DoctorFinding("ERROR", f"invalid {benchmark_id} split: {split}"))
+        else:
+            for task in tasks:
+                try:
+                    relative_path(str(task))
+                    bundle = root / paths.get("prepared_tasks", "prepared_tasks") / benchmark_id / split / str(task)
+                    spec = load_prepared(bundle)
+                    if (spec.benchmark_id, spec.split, spec.task_id) != (benchmark_id, split, str(task)):
+                        raise ValueError("prepared task identity mismatch")
+                    if benchmark.get("profile") != spec.profile:
+                        raise ValueError("prepared task profile differs from configured profile")
+                except (ValueError, OSError) as exc:
+                    findings.append(DoctorFinding("BLOCKED", f"prepared task {task}: {exc}"))
+        if benchmark_id == "corebench" and not re.fullmatch(r"(?:[^\s]+@)?sha256:[0-9a-f]{64}", data.get("runtime", {}).get("image", "")):
+            findings.append(DoctorFinding("BLOCKED", "CORE requires a frozen task runtime image"))
+        if benchmark_id == "discoverybench" and data.get("judge", {}).get("enabled") and data.get("judge", {}).get("name") in (None, "", "SET_ME"):
+            findings.append(DoctorFinding("BLOCKED", "Discovery judge model is not configured"))
     for key in ("benchmark", "upstream_root"):
         raw = paths.get(key)
         if raw and not (root / raw).exists():

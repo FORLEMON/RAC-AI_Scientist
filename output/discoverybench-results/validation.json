@@ -1,0 +1,36 @@
+{
+  "validated_at_utc": "2026-09-23T20:09:50.255994+00:00",
+  "selected_episode_count": 6,
+  "score_json_exact_match_count": 6,
+  "valid_submission_hash_match_count": 5,
+  "invalid_submission_null_count": 1,
+  "csv_json_scores_and_calls_match": true,
+  "model_request_response_error_reconciliation": true,
+  "budget_token_and_cost_reconciliation": true,
+  "source_files_preserved_and_hash_checked": true,
+  "export_secret_scan": "passed known credential values, token prefixes, bearer tokens and credential assignments",
+  "credential_files_exported": 0,
+  "opaque_files_excluded": [
+    {
+      "source": "runs/smoke-20260923/episodes/discoverybench_agent_laboratory_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__agent_laboratory__N0__s0__r0__a78770e65/workspace/.rac/agent_laboratory.pkl",
+      "reason": "opaque state/binary excluded; original retained locally"
+    },
+    {
+      "source": "runs/smoke-20260923/episodes/discoverybench_agent_laboratory_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__agent_laboratory__N0__s0__r0__a78770e65/workspace/state_saves/Paper0.pkl",
+      "reason": "opaque state/binary excluded; original retained locally"
+    },
+    {
+      "source": "runs/smoke-20260923/episodes/discoverybench_agent_laboratory_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__agent_laboratory__R1__s0__r0__a78770e65/workspace/.rac/agent_laboratory.pkl",
+      "reason": "opaque state/binary excluded; original retained locally"
+    },
+    {
+      "source": "runs/smoke-20260923/episodes/discoverybench_agent_laboratory_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__agent_laboratory__R1__s0__r0__a78770e65/workspace/data/processed_1989_data/data-00000-of-00001.arrow",
+      "reason": "opaque state/binary excluded; original retained locally"
+    },
+    {
+      "source": "runs/smoke-20260923/episodes/discoverybench_agent_laboratory_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__agent_laboratory__R3__s0__r0__a78770e65/workspace/.rac/agent_laboratory.pkl",
+      "reason": "opaque state/binary excluded; original retained locally"
+    }
+  ],
+  "limitations": "Pattern and known-value scanning cannot prove absence of every unknown secret. Opaque state/credentials excluded."
+}

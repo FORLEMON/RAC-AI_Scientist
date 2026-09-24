@@ -34,9 +34,10 @@ TERMINAL_TAGS = ("terminal_review", "finalize")
 class SharedPolicy:
     """Host-neutral cumulative N0--R3 coordination policy."""
 
-    def __init__(self, condition: Condition | str, *, review_score_threshold: float = 8.0):
+    def __init__(self, condition: Condition | str, *, review_score_threshold: float = 8.0, task_spec=None):
         self.condition = Condition.parse(condition)
         self.review_score_threshold = review_score_threshold
+        self.task_spec = task_spec
 
     def decide(self, checkpoint: Checkpoint, *, native_next: str | None = None) -> CoordinationDecision:
         if checkpoint.terminal:
@@ -121,7 +122,8 @@ class SharedPolicy:
                     return native_card
             desired.extend(issue.required_tags or ISSUE_TAGS.get(issue.kind, (issue.kind,)))
         else:
-            has_report = any(item.kind == "terminal_report" for item in checkpoint.artifacts)
+            kind = "terminal_submission" if self.task_spec and self.task_spec.benchmark_id != "researchclawbench" else "terminal_report"
+            has_report = any(item.kind == kind for item in checkpoint.artifacts)
             desired.append("terminal_review" if has_report else "finalize")
 
         scored: list[tuple[int, str, CapabilityCard]] = []
@@ -135,8 +137,7 @@ class SharedPolicy:
             return sorted(planners, key=lambda item: item.capability_id)[0] if planners else None
         return best[2]
 
-    @staticmethod
-    def _contract(checkpoint: Checkpoint, card: CapabilityCard) -> WorkContract:
+    def _contract(self, checkpoint: Checkpoint, card: CapabilityCard) -> WorkContract:
         scoped_issues = tuple(
             item for item in checkpoint.issues
             if not item.resolved and (
@@ -151,7 +152,9 @@ class SharedPolicy:
             objective += "; resolve only these scoped issues:\n" + "\n".join(
                 f"- {item.issue_id}: {item.summary}" for item in scoped_issues
             )
-        if "finalize" in card.tags and "terminal_review" in card.tags:
+        if self.task_spec and self.task_spec.benchmark_id != "researchclawbench" and "finalize" in card.tags:
+            evidence = (EvidenceRequirement("benchmark_submission"), EvidenceRequirement("nonempty_output"))
+        elif "finalize" in card.tags and "terminal_review" in card.tags:
             evidence = (
                 EvidenceRequirement("terminal_report", minimum_bytes=200),
                 EvidenceRequirement("nonempty_output"),
@@ -212,6 +215,8 @@ def verify_result(contract: WorkContract, result: InvocationResult) -> Verificat
             candidates = [item for item in after.values() if not requirement.artifact_kinds or item.kind in requirement.artifact_kinds]
             passed = any(item.size_bytes >= requirement.minimum_bytes for item in candidates)
             checks.append(CheckResult("artifact_exists", passed))
+        elif requirement.kind == "benchmark_submission":
+            checks.append(CheckResult("benchmark_submission", result.metrics.get("submission_valid") == 1.0))
         elif requirement.kind == "terminal_report":
             candidates = [item for item in after.values() if item.kind == "terminal_report"]
             passed = any(item.relative_path in changed and item.size_bytes >= requirement.minimum_bytes for item in candidates)

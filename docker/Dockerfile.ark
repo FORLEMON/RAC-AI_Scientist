@@ -1,5 +1,5 @@
-# syntax=docker/dockerfile:1.7
-FROM python:3.11-slim
+ARG PYTHON_IMAGE=python:3.12-slim
+FROM ${PYTHON_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -9,28 +9,35 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CONDA_NOTICES_DISABLED=true
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git pandoc texlive-latex-base texlive-latex-extra texlive-fonts-recommended \
+    build-essential git curl procps tmux pandoc texlive-latex-base texlive-latex-extra texlive-fonts-recommended \
     && rm -rf /var/lib/apt/lists/*
 
-ADD https://github.com/conda-forge/miniforge/releases/download/26.7.2-0/Miniforge3-Linux-x86_64.sh /tmp/miniforge.sh
-RUN bash /tmp/miniforge.sh -b -p /opt/conda \
+COPY --from=runtime_assets miniforge-26.7.2-0.sh /tmp/miniforge.sh
+RUN echo '281b0ac7d550802efc81af633225a5e6116d29ae72f3ab4eae7168c3931a4c05  /tmp/miniforge.sh' | sha256sum -c - \
+    && bash /tmp/miniforge.sh -b -p /opt/conda \
     && rm /tmp/miniforge.sh \
     && /opt/conda/bin/conda create -y -n ark-base \
-       python=3.11 pip pyyaml numpy scipy pandas matplotlib seaborn scikit-learn \
-    && printf '%s\n' /usr/local/lib/python3.11/site-packages \
-       > /opt/conda/envs/ark-base/lib/python3.11/site-packages/system-site-packages.pth \
+       python=3.12 pip pyyaml numpy scipy pandas matplotlib seaborn scikit-learn \
+    && printf '%s\n' /usr/local/lib/python3.12/site-packages \
+       > /opt/conda/envs/ark-base/lib/python3.12/site-packages/system-site-packages.pth \
     && chmod -R a+rX /opt/conda \
     && chmod -R a+rwX /opt/conda/pkgs
 
 COPY --from=host . /opt/host
+COPY --from=paperbanana . /opt/host/submodules/PaperBanana
 COPY pyproject.toml README.md LICENSE /opt/integration/
 COPY src /opt/integration/src
 COPY configs /opt/integration/configs
 COPY upstream.lock.json /opt/integration/upstream.lock.json
 
 RUN python -m pip install --no-cache-dir -e '/opt/host[research]' -e /opt/integration \
+        python-dotenv sqlalchemy \
     && python -m pip install --no-cache-dir uv \
-    && uv tool install --python 3.12 openhands
+    && uv tool install --python /usr/local/bin/python 'openhands==1.16.0' \
+    && python -m pip check \
+    && python -m pip freeze > /opt/integration/ark-environment.txt \
+    && uv pip freeze --python /root/.local/share/uv/tools/openhands/bin/python \
+       > /opt/integration/openhands-environment.txt
 
 # This Azure deployment exposes GPT-5.5 through Chat Completions. OpenHands
 # otherwise selects Responses API from the model-name registry.
@@ -53,6 +60,16 @@ RUN llm_file="$(find /root/.local/share/uv/tools/openhands/lib \
         "$llm_file" \
     && grep -q '_skip_responses_api_bridge=True' "$llm_file"
 
+COPY benchmark.lock.json /opt/integration/benchmark.lock.json
+# Restore upstream runtime assets omitted by its own .dockerignore, including
+# venue templates. The archive is produced only from a verified source tree.
+COPY --from=archives ark-source.tar /tmp/ark-source.tar
+RUN tar -xf /tmp/ark-source.tar -C /opt/host && rm /tmp/ark-source.tar
+RUN python -m pip install --no-cache-dir 'sqlmodel>=0.0.14' \
+    && printf '%s\n' /opt/host /opt/integration/src \
+       > /opt/conda/envs/ark-base/lib/python3.12/site-packages/rac-sources.pth \
+    && python -m pip check \
+    && python -m pip freeze > /opt/integration/ark-environment.txt
 WORKDIR /opt/integration
 ENTRYPOINT ["rac-ai-scientist"]
 CMD ["doctor-host", "--host", "ark"]

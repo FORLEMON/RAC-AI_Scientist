@@ -23,7 +23,8 @@ class EpisodeRunner:
     def __init__(self, bridge: HostBridge, condition: Condition | str, ledger: JsonlLedger, *, review_score_threshold: float = 8.0):
         self.bridge = bridge
         self.condition = Condition.parse(condition)
-        self.policy = SharedPolicy(self.condition, review_score_threshold=review_score_threshold)
+        self.policy = SharedPolicy(self.condition, review_score_threshold=review_score_threshold,
+                                   task_spec=getattr(bridge, "task_spec", None))
         self.ledger = ledger
         self._issue_sightings: dict[str, int] = {}
 
@@ -64,6 +65,8 @@ class EpisodeRunner:
             transaction = WorkspaceTransaction(self.bridge.transaction_workspace())
             try:
                 result = self.bridge.invoke(decision.capability_id, decision.contract)
+                if decision.contract and any(item.kind == "benchmark_submission" for item in decision.contract.required_evidence):
+                    result.metrics["submission_valid"] = float(self.bridge.submission_valid())
                 self.bridge.publish_invocation(result)
                 self.ledger.append({"type": "invocation", "hop": invocations, "payload": result})
                 pending = self.policy.evaluate(checkpoint, decision, result)

@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "experiment_id": "corebench_agent_laboratory_dev",
+  "benchmark": {
+    "id": "corebench",
+    "split": "dev",
+    "profile": "hal-hard-cpu"
+  },
+  "hosts": [
+    "agent_laboratory"
+  ],
+  "conditions": [
+    "N0",
+    "R1",
+    "R3"
+  ],
+  "tasks": ["capsule-4180912"],
+  "seeds": [
+    0
+  ],
+  "repeats": 1,
+  "max_parallel_episodes": 1,
+  "model": {
+    "name": "DeepSeek-V4-Pro",
+    "api_key_env": "AGENT_API_KEY",
+    "api_base_env": "AGENT_API_BASE"
+  },
+  "runtime": {
+    "image": "sha256:7253e3ee9ce1e9c5bdf778f63c1fb7f40a4a7b9f042eb5265dcfc9f25e3122a2",
+    "profile": "bootstrap-python-cpu",
+    "memory": "8g",
+    "cpus": 4
+  },
+  "judge": {
+    "enabled": false
+  },
+  "budget": {
+    "max_provider_cost_usd": 40,
+    "max_input_tokens": 60000000,
+    "max_output_tokens": 1300000,
+    "max_agent_calls": 900,
+    "max_wall_seconds": 21600,
+    "max_hops": 8
+  },
+  "paths": {
+    "benchmark": "upstreams/hal_harness",
+    "dataset": "upstreams/benchmark-data/corebench/core_test.json",
+    "capsules": "upstreams/benchmark-data/corebench/capsules",
+    "prepared_tasks": "prepared_tasks",
+    "upstream_root": "upstreams",
+    "run_root": "runs"
+  },
+  "budget_provenance": {
+    "cost_override": "USD 40 per episode, explicitly set by the user for DiscoveryBench and CORE-Bench on 2026-09-22; supersedes the historical/example cost ceiling.",
+    "evidence": "provisional_from_example",
+    "reference": "Runbook section 4.2 and README example; not a verified historical Agent Laboratory run budget. max_hops from user screenshot.",
+    "scope": "Per episode lifecycle totals shared by N0, R1 and R3; not per-request generation limits.",
+    "new_benchmark_calibration": "Not yet performed; one smoke task selected, no live episode executed."
+  }
+}

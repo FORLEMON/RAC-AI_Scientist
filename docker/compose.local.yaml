@@ -1,0 +1,22 @@
+# Use official Docker Library replicas on AWS Public ECR when Docker Hub is
+# unreachable. All host sources remain pinned by upstream.lock.json.
+services:
+  ark:
+    image: rac-local/ark:validated
+    extra_hosts: &controller_host
+      - host.docker.internal:host-gateway
+    build:
+      args:
+        PYTHON_IMAGE: public.ecr.aws/docker/library/python:3.12-slim
+  agent-laboratory:
+    image: rac-local/agent-laboratory:validated
+    extra_hosts: *controller_host
+    build:
+      args:
+        PYTHON_IMAGE: public.ecr.aws/docker/library/python:3.11-slim
+  evo-scientist:
+    image: rac-local/evo-scientist:validated
+    extra_hosts: *controller_host
+    build:
+      args:
+        PYTHON_IMAGE: public.ecr.aws/docker/library/python:3.13-slim

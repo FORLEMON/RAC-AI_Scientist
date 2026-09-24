@@ -5,10 +5,15 @@ services:
       dockerfile: docker/Dockerfile.ark
       additional_contexts:
         host: ${ARK_CONTEXT:-./upstreams/ark}
+        paperbanana: ${PAPERBANANA_CONTEXT:-./upstreams/paperbanana}
+        archives: ${HOST_ARCHIVES_CONTEXT:-./upstreams/host_archives}
+        runtime_assets: ${RUNTIME_ASSETS_CONTEXT:-./upstreams/runtime_assets}
     environment: &agent_environment
       AGENT_API_BASE: ${AGENT_API_BASE:-}
       AGENT_API_KEY: ${AGENT_API_KEY:-}
       AGENT_MODEL_NAME: ${AGENT_MODEL_NAME:-}
+      RAC_TASK_RUNTIME_URL: ${RAC_TASK_RUNTIME_URL:-}
+      RAC_TASK_RUNTIME_TOKEN: ${RAC_TASK_RUNTIME_TOKEN:-}
       SHAREDNET_BASE_URL: ${SHAREDNET_BASE_URL:-https://www.sharednet.ai}
       SHAREDNET_INVITE: ${SHAREDNET_INVITE:-}
       SHAREDNET_ROOM_ID: ${SHAREDNET_ROOM_ID:-}
@@ -22,6 +27,7 @@ services:
       dockerfile: docker/Dockerfile.agent-laboratory
       additional_contexts:
         host: ${AGENT_LABORATORY_CONTEXT:-./upstreams/agent_laboratory}
+        runtime_assets: ${RUNTIME_ASSETS_CONTEXT:-./upstreams/runtime_assets}
     environment: *agent_environment
     volumes: *run_volumes
 

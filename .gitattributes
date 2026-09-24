@@ -3,3 +3,6 @@
 *.jpg binary
 *.jpeg binary
 *.pdf binary
+*.zip binary
+# Preserve exported evidence bytes so published SHA-256 manifests stay valid.
+output/** -text

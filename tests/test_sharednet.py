@@ -10,6 +10,7 @@ from rac_ai_scientist.schemas import InvocationResult
 from rac_ai_scientist.sharednet import (
     MAX_FIELD_BYTES,
     MAX_MESSAGE_BYTES,
+    RoomClient,
     RoomMessage,
     SharedNetInvite,
     SharedNetSession,
@@ -87,6 +88,18 @@ class SharedNetTests(unittest.TestCase):
     def setUp(self):
         FakeRoomClient.reset()
 
+    def test_long_matrix_names_are_bounded_and_roles_remain_distinct(self):
+        names = []
+        def transport(method, url, headers, body, timeout):
+            names.append(body["name"])
+            return 200, {"member_token": "private", "history": {"items": []}}
+        client = RoomClient("https://www.sharednet.ai", "rom_test", transport=transport)
+        for role in ("researcher", "experimenter", "researcher"):
+            client.join("invite", "very-long-episode-id-" * 8 + role)
+        self.assertTrue(all(len(name) <= 48 for name in names))
+        self.assertNotEqual(names[0], names[1])
+        self.assertEqual(names[0], names[2])
+
     def test_explicit_room_must_match_invite(self):
         with self.assertRaises(ValueError):
             SharedNetInvite.parse(
@@ -141,6 +154,17 @@ class SharedNetTests(unittest.TestCase):
             ["work.request", "work.result", "work.accepted", "work.request"],
         )
         self.assertTrue(all(item.get("episode_id") == "episode-1" for item in typed if item))
+
+    def test_other_attempt_protocol_messages_do_not_become_context(self):
+        invite=SharedNetInvite.parse('rit_'+'a'*43,room_id='rom_run1')
+        old=SharedNetSession(invite,'old-attempt',('researcher',),client_factory=FakeRoomClient)
+        old.join()
+        old.request('researcher',0,'old request',None)
+        old.result('researcher',0,'startup failure',None)
+        current=SharedNetSession(invite,'current-attempt',('researcher',),client_factory=FakeRoomClient)
+        current.join()
+        prompt=current.request('researcher',0,'new request',None)
+        self.assertEqual(prompt,'new request')
 
     def test_guidance_sent_while_agent_runs_is_not_skipped(self):
         invite = SharedNetInvite.parse(

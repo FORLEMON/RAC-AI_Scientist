@@ -1,0 +1,9 @@
+# Build once, then run by image ID or registry digest. No capsule dependencies,
+# host frameworks, RAC controller or scorer are installed in this image.
+ARG PYTHON_IMAGE=python:3.11-slim
+FROM ${PYTHON_IMAGE}
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+RUN test -x /bin/bash \
+    && python -m pip uninstall -y wheel packaging \
+    && python -m pip check
+CMD ["python3", "-c", "import time; time.sleep(10**9)"]

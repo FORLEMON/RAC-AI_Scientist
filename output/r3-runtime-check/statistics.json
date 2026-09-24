@@ -1,0 +1,425 @@
+{
+  "as_of": "2026-09-23T20:08:48+0100",
+  "timing_method": "Request/response or runtime-result file modification intervals, approximate wall time; union of overlapping intervals; pending intervals end at inspection time. Agent costs are conservative estimates, excluding judge fees.",
+  "rows": [
+    {
+      "host": "evo_scientist",
+      "benchmark": "discoverybench",
+      "condition": "R3",
+      "status": "failed",
+      "calls": 446,
+      "model_completed": 446,
+      "model_minutes": 115.4,
+      "model_mean_seconds": 15.52,
+      "model_median_seconds": 8.93,
+      "model_p95_seconds": 45.98,
+      "model_max_seconds": 199.81,
+      "runtime_calls": 185,
+      "runtime_minutes": 8.64,
+      "elapsed_minutes": 124.28,
+      "input_tokens": 19139854,
+      "output_tokens": 190737,
+      "cost_estimate": 39.042656000000015,
+      "runtime_failures": 44
+    },
+    {
+      "host": "evo_scientist",
+      "benchmark": "corebench",
+      "condition": "R3",
+      "status": "failed",
+      "calls": 148,
+      "model_completed": 148,
+      "model_minutes": 42.45,
+      "model_mean_seconds": 17.21,
+      "model_median_seconds": 13.04,
+      "model_p95_seconds": 47.4,
+      "model_max_seconds": 74.45,
+      "runtime_calls": 61,
+      "runtime_minutes": 32.87,
+      "elapsed_minutes": 76.88,
+      "input_tokens": 12222142,
+      "output_tokens": 49793,
+      "cost_estimate": 24.643456000000008,
+      "runtime_failures": 9
+    },
+    {
+      "host": "ark",
+      "benchmark": "discoverybench",
+      "condition": "R3",
+      "status": "failed",
+      "calls": 0,
+      "model_completed": 0,
+      "model_minutes": 0.0,
+      "model_mean_seconds": null,
+      "model_median_seconds": null,
+      "model_p95_seconds": null,
+      "model_max_seconds": null,
+      "runtime_calls": 0,
+      "runtime_minutes": 0.0,
+      "elapsed_minutes": 0.26,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cost_estimate": 0.0,
+      "runtime_failures": 0
+    },
+    {
+      "host": "ark",
+      "benchmark": "corebench",
+      "condition": "R3",
+      "status": "failed",
+      "calls": 0,
+      "model_completed": 0,
+      "model_minutes": 0.0,
+      "model_mean_seconds": null,
+      "model_median_seconds": null,
+      "model_p95_seconds": null,
+      "model_max_seconds": null,
+      "runtime_calls": 0,
+      "runtime_minutes": 0.0,
+      "elapsed_minutes": 0.26,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cost_estimate": 0.0,
+      "runtime_failures": 0
+    },
+    {
+      "host": "agent_laboratory",
+      "benchmark": "discoverybench",
+      "condition": "N0",
+      "status": "completed",
+      "calls": 182,
+      "model_completed": 182,
+      "model_minutes": 130.82,
+      "model_mean_seconds": 43.13,
+      "model_median_seconds": 16.96,
+      "model_p95_seconds": 189.46,
+      "model_max_seconds": 300.98,
+      "runtime_calls": 34,
+      "runtime_minutes": 43.87,
+      "elapsed_minutes": 180.04,
+      "input_tokens": 3916908,
+      "output_tokens": 669438,
+      "cost_estimate": 10.511567999999995,
+      "runtime_failures": 22
+    },
+    {
+      "host": "agent_laboratory",
+      "benchmark": "discoverybench",
+      "condition": "R1",
+      "status": "completed",
+      "calls": 179,
+      "model_completed": 179,
+      "model_minutes": 68.15,
+      "model_mean_seconds": 22.84,
+      "model_median_seconds": 9.78,
+      "model_p95_seconds": 86.14,
+      "model_max_seconds": 298.0,
+      "runtime_calls": 26,
+      "runtime_minutes": 1.85,
+      "elapsed_minutes": 74.41,
+      "input_tokens": 2894915,
+      "output_tokens": 302924,
+      "cost_estimate": 7.001525999999997,
+      "runtime_failures": 22
+    },
+    {
+      "host": "agent_laboratory",
+      "benchmark": "discoverybench",
+      "condition": "R3",
+      "status": "running",
+      "calls": 121,
+      "model_completed": 121,
+      "model_minutes": 47.12,
+      "model_mean_seconds": 21.97,
+      "model_median_seconds": 5.78,
+      "model_p95_seconds": 129.12,
+      "model_max_seconds": 208.41,
+      "runtime_calls": 16,
+      "runtime_minutes": 11.02,
+      "elapsed_minutes": 63.71,
+      "input_tokens": 2691193,
+      "output_tokens": 165047,
+      "cost_estimate": 6.042573999999999,
+      "runtime_failures": 11,
+      "runtime_errors": [
+        {
+          "id": "000001",
+          "seconds": 0.44,
+          "exit": 1,
+          "timeout": false,
+          "error_tail": "Traceback (most recent call last):\n  File \"<string>\", line 2, in <module>\nModuleNotFoundError: No module named 'pandas'\n"
+        },
+        {
+          "id": "000003",
+          "seconds": 0.63,
+          "exit": 1,
+          "timeout": false,
+          "error_tail": "Traceback (most recent call last):\n  File \"<string>\", line 71, in <module>\nFileNotFoundError: [Errno 2] No such file or directory: 'data/processed/nls_bmi_cleaned.csv'\n"
+        },
+        {
+          "id": "000004",
+          "seconds": 0.79,
+          "exit": 1,
+          "timeout": false,
+          "error_tail": "Traceback (most recent call last):\n  File \"<string>\", line 86, in <module>\nNameError: name '__file__' is not defined. Did you mean: '__name__'?\n"
+        },
+        {
+          "id": "000006",
+          "seconds": 0.87,
+          "exit": 1,
+          "timeout": false,
+          "error_tail": "Traceback (most recent call last):\n  File \"<string>\", line 119, in <module>\nModuleNotFoundError: No module named 'numpy'\n"
+        },
+        {
+          "id": "000007",
+          "seconds": 1.22,
+          "exit": 1,
+          "timeout": false,
+          "error_tail": "Traceback (most recent call last):\n  File \"<string>\", line 583, in <module>\n  File \"<string>\", line 330, in fit\n  File \"<string>\", line 155, in mat_inv\nValueError: Matrix is singular\n"
+        },
+        {
+          "id": "000008",
+          "seconds": 0.8,
+          "exit": 1,
+          "timeout": false,
+          "error_tail": "Traceback (most recent call last):\n  File \"<string>\", line 119, in <module>\nModuleNotFoundError: No module named 'numpy'\n"
+        },
+        {
+          "id": "000009",
+          "seconds": 591.53,
+          "exit": 124,
+          "timeout": true,
+          "error_tail": ""
+        },
+        {
+          "id": "000010",
+          "seconds": 0.82,
+          "exit": 1,
+          "timeout": false,
+          "error_tail": "Traceback (most recent call last):\n  File \"<string>\", line 119, in <module>\nModuleNotFoundError: No module named 'numpy'\n"
+        },
+        {
+          "id": "000011",
+          "seconds": 0.98,
+          "exit": 1,
+          "timeout": false,
+          "error_tail": "Traceback (most recent call last):\n  File \"<string>\", line 119, in <module>\nModuleNotFoundError: No module named 'pandas'\n"
+        },
+        {
+          "id": "000015",
+          "seconds": 0.71,
+          "exit": 1,
+          "timeout": false,
+          "error_tail": "  File \"<string>\", line 306\n    with open(f'outputs/regression_{race_label.lower().replace(' ', '_')}.txt', 'w') as f:\n                                                                     ^\nSyntaxError: f-string: unmatched '('\n"
+        },
+        {
+          "id": "000016",
+          "seconds": 0.9,
+          "exit": 1,
+          "timeout": false,
+          "error_tail": "Traceback (most recent call last):\n  File \"<string>\", line 121, in <module>\nModuleNotFoundError: No module named 'numpy'\n"
+        }
+      ],
+      "runtime_longest": [
+        {
+          "id": "000009",
+          "seconds": 591.53,
+          "complete": true
+        },
+        {
+          "id": "000013",
+          "seconds": 24.63,
+          "complete": true
+        },
+        {
+          "id": "000012",
+          "seconds": 24.17,
+          "complete": true
+        },
+        {
+          "id": "000014",
+          "seconds": 11.49,
+          "complete": true
+        },
+        {
+          "id": "000007",
+          "seconds": 1.22,
+          "complete": true
+        }
+      ],
+      "recent_model_seconds": [
+        {
+          "id": "000113",
+          "seconds": 3.14,
+          "complete": true
+        },
+        {
+          "id": "000114",
+          "seconds": 138.34,
+          "complete": true
+        },
+        {
+          "id": "000115",
+          "seconds": 5.26,
+          "complete": true
+        },
+        {
+          "id": "000116",
+          "seconds": 163.9,
+          "complete": true
+        },
+        {
+          "id": "000117",
+          "seconds": 133.31,
+          "complete": true
+        },
+        {
+          "id": "000118",
+          "seconds": 3.16,
+          "complete": true
+        },
+        {
+          "id": "000119",
+          "seconds": 68.02,
+          "complete": true
+        },
+        {
+          "id": "000120",
+          "seconds": 44.47,
+          "complete": true
+        },
+        {
+          "id": "000121",
+          "seconds": 50.19,
+          "complete": true
+        },
+        {
+          "id": "000122",
+          "seconds": 168.49,
+          "complete": false
+        }
+      ],
+      "uncovered_minutes": 5.57,
+      "coordination": [
+        {
+          "hop": null,
+          "type": "checkpoint",
+          "native_stage": "literature_review",
+          "capability": null,
+          "status": null
+        },
+        {
+          "hop": 0,
+          "type": "decision",
+          "native_stage": null,
+          "capability": "literature_review",
+          "status": null
+        },
+        {
+          "hop": 0,
+          "type": "invocation",
+          "native_stage": null,
+          "capability": "literature_review",
+          "status": null
+        },
+        {
+          "hop": 0,
+          "type": "evaluation",
+          "native_stage": null,
+          "capability": null,
+          "status": null
+        },
+        {
+          "hop": null,
+          "type": "checkpoint",
+          "native_stage": "plan_formulation",
+          "capability": null,
+          "status": null
+        },
+        {
+          "hop": 1,
+          "type": "decision",
+          "native_stage": null,
+          "capability": "plan_formulation",
+          "status": null
+        },
+        {
+          "hop": 1,
+          "type": "invocation",
+          "native_stage": null,
+          "capability": "plan_formulation",
+          "status": null
+        },
+        {
+          "hop": 1,
+          "type": "evaluation",
+          "native_stage": null,
+          "capability": null,
+          "status": null
+        },
+        {
+          "hop": null,
+          "type": "checkpoint",
+          "native_stage": "data_preparation",
+          "capability": null,
+          "status": null
+        },
+        {
+          "hop": 2,
+          "type": "decision",
+          "native_stage": null,
+          "capability": "data_preparation",
+          "status": null
+        },
+        {
+          "hop": 2,
+          "type": "invocation",
+          "native_stage": null,
+          "capability": "data_preparation",
+          "status": null
+        },
+        {
+          "hop": 2,
+          "type": "evaluation",
+          "native_stage": null,
+          "capability": null,
+          "status": null
+        },
+        {
+          "hop": null,
+          "type": "checkpoint",
+          "native_stage": "running_experiments",
+          "capability": null,
+          "status": null
+        },
+        {
+          "hop": 3,
+          "type": "decision",
+          "native_stage": null,
+          "capability": "running_experiments",
+          "status": null
+        }
+      ]
+    },
+    {
+      "host": "agent_laboratory",
+      "benchmark": "corebench",
+      "condition": "R3",
+      "status": "failed",
+      "calls": 33,
+      "model_completed": 33,
+      "model_minutes": 4.81,
+      "model_mean_seconds": 8.75,
+      "model_median_seconds": 6.83,
+      "model_p95_seconds": 35.74,
+      "model_max_seconds": 45.71,
+      "runtime_calls": 0,
+      "runtime_minutes": 0.0,
+      "elapsed_minutes": 10.5,
+      "input_tokens": 360898,
+      "output_tokens": 5091,
+      "cost_estimate": 0.7421599999999999,
+      "runtime_failures": 0
+    }
+  ]
+}

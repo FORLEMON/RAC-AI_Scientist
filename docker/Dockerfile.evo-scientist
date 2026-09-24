@@ -1,10 +1,10 @@
-# syntax=docker/dockerfile:1.7
-FROM python:3.13-slim
+ARG PYTHON_IMAGE=python:3.13-slim
+FROM ${PYTHON_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 RAC_HOST_ROOT=/opt/host \
     EVOSCIENTIST_DISABLE_UPDATE_CHECK=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential git curl \
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential git curl nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=host . /opt/host
@@ -13,9 +13,16 @@ COPY src /opt/integration/src
 COPY configs /opt/integration/configs
 COPY upstream.lock.json /opt/integration/upstream.lock.json
 
-RUN python -m pip install --no-cache-dir -e /opt/host -e /opt/integration numpy scipy matplotlib pandas \
+RUN python -m pip install --no-cache-dir uv \
+    && cd /opt/host && uv export --frozen --no-dev --no-emit-project > /tmp/evo-requirements.txt \
+    && uv pip install --system -r /tmp/evo-requirements.txt -e /opt/host -e /opt/integration numpy scipy matplotlib pandas \
+    && python -m pip check \
     && python -m pip freeze > /opt/integration/evo-environment.txt
 
+COPY benchmark.lock.json /opt/integration/benchmark.lock.json
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        texlive-latex-base texlive-latex-extra texlive-fonts-recommended latexmk pandoc \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/integration
 ENTRYPOINT ["rac-ai-scientist"]
 CMD ["doctor-host", "--host", "evo_scientist"]

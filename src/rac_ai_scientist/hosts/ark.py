@@ -77,7 +77,9 @@ class ArkBridge(HostBridge):
         self.manifest = load_host_manifest(manifest)
         self.cards = capability_cards(self.manifest)
         self.initial_budget = budget
-        self.model = model
+        # ARK/OpenHands requires a LiteLLM provider prefix. Deployment names
+        # from our OpenAI-compatible endpoint remain unchanged on the wire.
+        self.model = model if "/" in model else f"openai/{model}"
         self.api_key = api_key
         self.workspace: Path | None = None
         self.orchestrator: Any = None
@@ -120,7 +122,7 @@ class ArkBridge(HostBridge):
             replacements = {
                 "{PROJECT_NAME}": episode_id,
                 "{PAPER_TITLE}": episode_id,
-                "{VENUE_NAME}": "ResearchClawBench",
+                "{VENUE_NAME}": getattr(getattr(self, "task_spec", None), "benchmark_id", "ResearchClawBench"),
                 "{VENUE_FORMAT}": "benchmark report",
                 "{VENUE_PAGES}": "unlimited",
                 "{LATEX_DIR}": "report",
@@ -128,6 +130,8 @@ class ArkBridge(HostBridge):
             }
             for old, new in replacements.items():
                 content = content.replace(old, new)
+            if self.benchmark_instructions():
+                content += "\n\n" + self.benchmark_instructions()
             (agents / source.name).write_text(content, encoding="utf-8")
         hook_comment = (
             "# ResearchClawBench native ARK run: no project-specific hooks.\n"
@@ -154,12 +158,17 @@ class ArkBridge(HostBridge):
         os.environ.setdefault("OPENAI_API_KEY", self.api_key)
         if os.environ.get("AGENT_API_BASE"):
             os.environ.setdefault("OPENAI_API_BASE", os.environ["AGENT_API_BASE"])
+            os.environ["OPENAI_BASE_URL"] = os.environ["AGENT_API_BASE"]
+            os.environ["LLM_BASE_URL"] = os.environ["AGENT_API_BASE"]
         if str(self.upstream) not in sys.path:
             sys.path.insert(0, str(self.upstream))
         from ark.orchestrator import Orchestrator
         from ark.engines.cli import OpenHandsCLI
 
         self._install_openhands_usage(OpenHandsCLI)
+        if getattr(self, "task_runtime", None):
+            from ..task_runtime.hooks import install_ark
+            install_ark(OpenHandsCLI, self.task_runtime)
 
         self.orchestrator = Orchestrator(
             project=episode_id,
@@ -797,6 +806,8 @@ class ArkBridge(HostBridge):
 
     def _context_text(self) -> str:
         assert self.workspace is not None
+        if self.benchmark_instructions():
+            return self.benchmark_instructions()
         return (
             f"# ResearchClawBench episode\n\n{self.objective}\n\n"
             "Use only task.json, data/, and related_work/. The target study and scoring checklist are hidden. "

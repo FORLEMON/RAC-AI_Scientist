@@ -1,0 +1,1186 @@
+{
+  "generated_utc": "2026-09-23T20:47:01.787453+00:00",
+  "scope": "Existing six retained DiscoveryBench runs, one task and seed. Offline auditing only; no judge or host calls.",
+  "original_runs_modified": false,
+  "formula": "(matched / gold) * sum(context * variable_f1 * relationship) / predicted",
+  "episodes": [
+    {
+      "episode_id": "discoverybench_evo_scientist_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__evo_scientist__N0__s0__r0__a78770e65",
+      "host": "evo_scientist",
+      "condition": "N0",
+      "score": 0.0,
+      "run_status": "completed",
+      "scoring_status": "scored",
+      "submission_status": "valid",
+      "model": "DeepSeek-V4-Pro",
+      "judge_model_used": "gpt-5.4",
+      "elapsed_minutes": 7.750542080402374,
+      "model_calls": 41,
+      "conservative_cost_usd_excluding_judge": 2.594976,
+      "end_reason_zh_CN": "host 正常退出，原生工作流报告完成；提交有效并评分。",
+      "score_path": "runs/smoke-20260923/episodes/discoverybench_evo_scientist_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__evo_scientist__N0__s0__r0__a78770e65/score.json",
+      "score_sha256": "a8ef3a533e7811d54828d50c519ad38069b232e025c3f7337f78b96ad53ab453",
+      "input_sha256": "8a85ad04997555dd31e958e1562caf0674cfe052c51f63960976ead38dbf219e",
+      "decomposition": {
+        "gold_count": 2,
+        "pred_count": 6,
+        "matched_count": 2,
+        "recall_context": 1.0,
+        "mean_accuracy": 0.0,
+        "recomputed_total": 0.0,
+        "gold_subhypotheses": [
+          {
+            "text": "For the 1989 data, BMI is positively related to whether a person spent more than their savings.",
+            "context": "Respondents in the NLSY79 dataset for year 1989.",
+            "variables": [
+              "BMI",
+              "DISSAVED"
+            ],
+            "relations": "Positive relationship between DISSAVED and BMI; OLS coefficient 0.3596."
+          },
+          {
+            "text": "For the 1989 data, BMI is positively related to whether a person's savings remained unchanged or they had no savings.",
+            "context": "Respondents in the NLSY79 dataset for year 1989.",
+            "variables": [
+              "BMI",
+              "SAMESAVE"
+            ],
+            "relations": "Positive relationship between SAMESAVE and BMI; OLS coefficient 0.4858."
+          }
+        ],
+        "pred_subhypotheses": [
+          {
+            "text": "In the 1989 NLSY79 data, time preference proxied by savings behavior is associated with higher BMI.",
+            "context": "Respondents in the 1989 NLSY79 dataset, after excluding extreme BMI outliers; association estimated controlling for age, gender, income, and race.",
+            "variables": [
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI",
+              "AGE",
+              "GENDER",
+              "INCOME",
+              "BLACK",
+              "HISPANIC"
+            ],
+            "relations": "DISSAVED=1 and SAMESAVE=1 are associated with slightly higher mean BMI relative to savers in OLS, conditional on age, gender, income, and race."
+          },
+          {
+            "text": "The association between time preference and BMI operates primarily through a right-tail expansion effect rather than a uniform shift.",
+            "context": "Across the BMI distribution in the 1989 NLSY79 sample using quantile regression.",
+            "variables": [
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI"
+            ],
+            "relations": "Savings behavior is related to heterogeneous quantile-specific effects on BMI, with stronger positive effects in the upper tail instead of a constant increase across the distribution."
+          },
+          {
+            "text": "At the lower tail of the BMI distribution, dissavers have lower BMI, while at the upper tail they have substantially higher BMI.",
+            "context": "For respondents in the 1989 NLSY79 dataset at BMI quantiles q=0.10–0.25 versus q=0.75–0.90.",
+            "variables": [
+              "DISSAVED",
+              "BMI"
+            ],
+            "relations": "The relationship between DISSAVED and BMI is conditional on BMI quantile: negative at lower quantiles and positive at upper quantiles."
+          },
+          {
+            "text": "Obesity prevalence is higher among dissavers and those with unchanged savings than among savers.",
+            "context": "Among 1989 NLSY79 respondents, using obesity defined from BMI.",
+            "variables": [
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI"
+            ],
+            "relations": "Compared with savers, dissavers and respondents with unchanged savings have higher obesity prevalence based on BMI≥30."
+          },
+          {
+            "text": "Time preference is associated with a widening of the BMI distribution, concentrating individuals at both the lean and obese extremes relative to savers.",
+            "context": "In the 1989 NLSY79 BMI distribution across time-preference groups.",
+            "variables": [
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI"
+            ],
+            "relations": "Savings behavior is associated with greater dispersion in BMI, increasing representation at both low-BMI and high-BMI extremes rather than shifting the whole distribution upward uniformly."
+          },
+          {
+            "text": "This pattern is consistent across gender and racial subgroups, with strongest effects among Black and Hispanic respondents.",
+            "context": "Across gender and race subgroups within the 1989 NLSY79 respondents.",
+            "variables": [
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI",
+              "GENDER",
+              "BLACK",
+              "HISPANIC"
+            ],
+            "relations": "The association between savings behavior and BMI distributional differences persists across gender and racial subgroups, with larger effects among Black and Hispanic respondents."
+          }
+        ],
+        "mapping": {
+          "0": -1,
+          "1": 0,
+          "2": -1,
+          "3": 1,
+          "4": -1,
+          "5": -1
+        },
+        "pairs": [
+          {
+            "pair": "P1||G0",
+            "gold_variable_count": 3,
+            "pred_variable_count": 9,
+            "intersection": 3,
+            "variable_f1": 0.5,
+            "relationship": 0.0,
+            "context": 1.0,
+            "accuracy": 0.0,
+            "relationship_judge_answer": "{\"answer\":\"C) different\",\"explanation\":\"HypoA states a simple positive relation between time-preference proxies (DISSAVED, SAMESAVE) and BMI in 1989, essentially a positive linear/mean-shift relationship. HypoB says the association is not a uniform upward shift: it is negative at lower BMI quantiles and positive at upper quantiles, i.e. a heterogeneous distributional/right-tail effect. Although HypoB includes positive average OLS coefficients, its main claimed relation differs from HypoA’s simple positive relation.\"}",
+            "facet_uses_full_gold_hypothesis": true,
+            "facet_uses_full_pred_hypothesis": true
+          },
+          {
+            "pair": "P3||G1",
+            "gold_variable_count": 3,
+            "pred_variable_count": 8,
+            "intersection": 3,
+            "variable_f1": 0.5454545454545454,
+            "relationship": 0.0,
+            "context": 1.0,
+            "accuracy": 0.0,
+            "relationship_judge_answer": "{\"answer\":\"C) different\",\"explanation\":\"HypoA states a simple positive relation between time-preference proxies (DISSAVED, SAMESAVE) and BMI in 1989, essentially a uniform positive linear association from OLS coefficients. HypoB includes that positive mean association, but its main claimed relation is different: the effect is heterogeneous across the BMI distribution, negative at lower quantiles and positive at upper quantiles, implying tail expansion rather than a simple positive shift. Thus HypoB does not exhibit the same relation as HypoA.\"}",
+            "facet_uses_full_gold_hypothesis": true,
+            "facet_uses_full_pred_hypothesis": true
+          }
+        ]
+      },
+      "route": [],
+      "verification": [],
+      "task_runtime": {
+        "requests": 21,
+        "exit_codes": {
+          "0": 17,
+          "1": 4
+        },
+        "nonzero_exit": 4,
+        "timeout_flag": 0,
+        "note": "External task-runtime requests, not model calls or independent experiments."
+      }
+    },
+    {
+      "episode_id": "discoverybench_evo_scientist_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__evo_scientist__R1__s0__r0__a78770e65",
+      "host": "evo_scientist",
+      "condition": "R1",
+      "score": null,
+      "run_status": "failed",
+      "scoring_status": "invalid_submission",
+      "submission_status": "invalid",
+      "model": "DeepSeek-V4-Pro",
+      "judge_model_used": null,
+      "elapsed_minutes": 52.48326843182246,
+      "model_calls": 134,
+      "conservative_cost_usd_excluding_judge": 19.357744,
+      "end_reason_zh_CN": "模型响应被 Azure content_filter（Jailbreak 标签）阻断；规定路径缺少有效 discovery_result.json，未评分。",
+      "score_path": "runs/smoke-20260923/episodes/discoverybench_evo_scientist_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__evo_scientist__R1__s0__r0__a78770e65/score.json",
+      "score_sha256": "58a40a5c70cff4dec88e8055d211a0eb57058c8cc65a45cfdcdc35e9409ab052",
+      "input_sha256": "8a85ad04997555dd31e958e1562caf0674cfe052c51f63960976ead38dbf219e",
+      "decomposition": null,
+      "route": [
+        "planner",
+        "research",
+        "code",
+        "debug",
+        "data_analysis"
+      ],
+      "verification": [],
+      "task_runtime": {
+        "requests": 55,
+        "exit_codes": {
+          "0": 49,
+          "1": 6
+        },
+        "nonzero_exit": 6,
+        "timeout_flag": 0,
+        "note": "External task-runtime requests, not model calls or independent experiments."
+      }
+    },
+    {
+      "episode_id": "discoverybench_evo_scientist_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__evo_scientist__R3__s0__r0__a78770e65",
+      "host": "evo_scientist",
+      "condition": "R3",
+      "score": 0.21818181818181817,
+      "run_status": "failed",
+      "scoring_status": "scored",
+      "submission_status": "valid",
+      "model": "DeepSeek-V4-Pro",
+      "judge_model_used": "gpt-5.4",
+      "elapsed_minutes": 124.28481137355169,
+      "model_calls": 446,
+      "conservative_cost_usd_excluding_judge": 39.042656,
+      "end_reason_zh_CN": "控制器以退出码 125 停止 host；依据冻结控制器代码和剩余预算，判断为模型网关保守预算预留保护触发。已有提交获得评分。",
+      "score_path": "runs/smoke-20260923/episodes/discoverybench_evo_scientist_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__evo_scientist__R3__s0__r0__a78770e65/score.json",
+      "score_sha256": "86382531ca1af1ab85bdff41839822317082d78061b5f339c9fbddcf83e41df6",
+      "input_sha256": "8a85ad04997555dd31e958e1562caf0674cfe052c51f63960976ead38dbf219e",
+      "decomposition": {
+        "gold_count": 2,
+        "pred_count": 5,
+        "matched_count": 2,
+        "recall_context": 1.0,
+        "mean_accuracy": 0.21818181818181817,
+        "recomputed_total": 0.21818181818181817,
+        "gold_subhypotheses": [
+          {
+            "text": "For the 1989 data, BMI is positively related to whether a person spent more than their savings.",
+            "context": "Respondents in the National Longitudinal Survey of Youth (NLSY79) for 1989 data.",
+            "variables": [
+              "BMI",
+              "DISSAVED"
+            ],
+            "relations": "Positive relationship between DISSAVED and BMI, with coefficient 0.3596 in the OLS regression."
+          },
+          {
+            "text": "For the 1989 data, BMI is positively related to whether a person's savings remained unchanged or they had no savings.",
+            "context": "Respondents in the National Longitudinal Survey of Youth (NLSY79) for 1989 data.",
+            "variables": [
+              "BMI",
+              "SAMESAVE"
+            ],
+            "relations": "Positive relationship between SAMESAVE and BMI, with coefficient 0.4858 in the OLS regression."
+          }
+        ],
+        "pred_subhypotheses": [
+          {
+            "text": "In the NLSY79 1989 data, both dissaving and non-saving are independently associated with higher BMI compared to active savers, after controlling for gender, age, income, and race/ethnicity.",
+            "context": "NLSY79 respondents in 1989; comparison of saving behavior groups with adjustment for demographic controls.",
+            "variables": [
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI",
+              "GENDER",
+              "AGE",
+              "AGE_2",
+              "INCOME",
+              "BLACK",
+              "HISPANIC"
+            ],
+            "relations": "Dissaving and non-saving are each independently positively associated with BMI relative to active savers, controlling for gender, age, age squared, income, and race/ethnicity."
+          },
+          {
+            "text": "The dissaver effect attenuates at the median BMI, suggesting upper-tail concentration.",
+            "context": "NLSY79 1989 data; median quantile regression analysis of BMI by saving behavior.",
+            "variables": [
+              "DISSAVED",
+              "BMI"
+            ],
+            "relations": "The positive association between dissaving and BMI is weaker at the median of the BMI distribution, indicating the effect is concentrated more in the upper tail."
+          },
+          {
+            "text": "The non-saver effect is robust including at the median.",
+            "context": "NLSY79 1989 data; median quantile regression analysis of BMI by saving behavior.",
+            "variables": [
+              "SAMESAVE",
+              "BMI"
+            ],
+            "relations": "The positive association between non-saving and BMI remains present at the median of the BMI distribution."
+          },
+          {
+            "text": "Time-preference–BMI associations are not uniform but concentrated in specific demographic intersections, with the largest dissaver effects among Hispanic males and Black females, and near-zero dissaver effects among White females.",
+            "context": "NLSY79 1989 data; three-way moderation by saving category, gender, and race group.",
+            "variables": [
+              "DISSAVED",
+              "BMI",
+              "GENDER",
+              "BLACK",
+              "HISPANIC"
+            ],
+            "relations": "The association between dissaving and BMI is moderated jointly by gender and race/ethnicity, being strongest for Hispanic males and Black females and near zero for White females."
+          },
+          {
+            "text": "Time-preference–BMI associations are not uniform but concentrated in specific demographic intersections, with the largest non-saver effects among Black females and Hispanic males, and near-zero non-saver effects among Black males.",
+            "context": "NLSY79 1989 data; three-way moderation by saving category, gender, and race group.",
+            "variables": [
+              "SAMESAVE",
+              "BMI",
+              "GENDER",
+              "BLACK",
+              "HISPANIC"
+            ],
+            "relations": "The association between non-saving and BMI is moderated jointly by gender and race/ethnicity, being strongest for Black females and Hispanic males and near zero for Black males."
+          }
+        ],
+        "mapping": {
+          "0": 0,
+          "1": -1,
+          "2": 1,
+          "3": -1,
+          "4": -1
+        },
+        "pairs": [
+          {
+            "pair": "P0||G0",
+            "gold_variable_count": 3,
+            "pred_variable_count": 8,
+            "intersection": 3,
+            "variable_f1": 0.5454545454545454,
+            "relationship": 1.0,
+            "context": 1.0,
+            "accuracy": 0.5454545454545454,
+            "relationship_judge_answer": "{\"answer\":\"A) very similar\",\"explanation\":\"Both hypotheses state the same core relation in the 1989 NLSY79 data: higher-BMI is positively associated with the time-preference proxies DISSAVED and SAMESAVE/non-saving. HypoA gives simple positive coefficients for these two variables, while HypoB restates the same positive associations more specifically with controls and subgroup/robustness details. The relation is therefore essentially the same, just more elaborated in HypoB.\"}",
+            "facet_uses_full_gold_hypothesis": true,
+            "facet_uses_full_pred_hypothesis": true
+          },
+          {
+            "pair": "P2||G1",
+            "gold_variable_count": 3,
+            "pred_variable_count": 8,
+            "intersection": 3,
+            "variable_f1": 0.5454545454545454,
+            "relationship": 1.0,
+            "context": 1.0,
+            "accuracy": 0.5454545454545454,
+            "relationship_judge_answer": "{\"answer\":\"A) very similar\",\"explanation\":\"HypoA states positive associations between BMI and the two time-preference proxies DISSAVED and SAMESAVE in 1989. HypoB states the same directional relation: dissaving and non-saving are independently associated with higher BMI, with added controls and subgroup detail. The core relation remains a positive association between the same variables, so HypoB is very similar rather than more general or different.\"}",
+            "facet_uses_full_gold_hypothesis": true,
+            "facet_uses_full_pred_hypothesis": true
+          }
+        ]
+      },
+      "route": [
+        "planner",
+        "research",
+        "code",
+        "debug",
+        "debug",
+        "data_analysis",
+        "writing"
+      ],
+      "verification": [
+        {
+          "hop": 0,
+          "verdict": "supported",
+          "checks": [
+            {
+              "name": "declared_writes_only",
+              "passed": true
+            },
+            {
+              "name": "artifact_changed",
+              "passed": true
+            },
+            {
+              "name": "nonempty_output",
+              "passed": true
+            }
+          ]
+        },
+        {
+          "hop": 1,
+          "verdict": "supported",
+          "checks": [
+            {
+              "name": "declared_writes_only",
+              "passed": true
+            },
+            {
+              "name": "artifact_changed",
+              "passed": true
+            },
+            {
+              "name": "nonempty_output",
+              "passed": true
+            }
+          ]
+        },
+        {
+          "hop": 2,
+          "verdict": "supported",
+          "checks": [
+            {
+              "name": "declared_writes_only",
+              "passed": true
+            },
+            {
+              "name": "artifact_changed",
+              "passed": true
+            },
+            {
+              "name": "nonempty_output",
+              "passed": true
+            }
+          ]
+        },
+        {
+          "hop": 3,
+          "verdict": "refuted",
+          "checks": [
+            {
+              "name": "declared_writes_only",
+              "passed": true
+            },
+            {
+              "name": "artifact_changed",
+              "passed": true
+            },
+            {
+              "name": "nonempty_output",
+              "passed": false
+            },
+            {
+              "name": "invocation_error",
+              "passed": false
+            }
+          ]
+        },
+        {
+          "hop": 4,
+          "verdict": "refuted",
+          "checks": [
+            {
+              "name": "declared_writes_only",
+              "passed": true
+            },
+            {
+              "name": "artifact_changed",
+              "passed": false
+            },
+            {
+              "name": "nonempty_output",
+              "passed": true
+            }
+          ]
+        },
+        {
+          "hop": 5,
+          "verdict": "supported",
+          "checks": [
+            {
+              "name": "declared_writes_only",
+              "passed": true
+            },
+            {
+              "name": "artifact_changed",
+              "passed": true
+            },
+            {
+              "name": "nonempty_output",
+              "passed": true
+            }
+          ]
+        }
+      ],
+      "task_runtime": {
+        "requests": 185,
+        "exit_codes": {
+          "0": 141,
+          "1": 44
+        },
+        "nonzero_exit": 44,
+        "timeout_flag": 0,
+        "note": "External task-runtime requests, not model calls or independent experiments."
+      }
+    },
+    {
+      "episode_id": "discoverybench_agent_laboratory_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__agent_laboratory__N0__s0__r0__a78770e65",
+      "host": "agent_laboratory",
+      "condition": "N0",
+      "score": 0.0,
+      "run_status": "completed",
+      "scoring_status": "scored",
+      "submission_status": "valid",
+      "model": "DeepSeek-V4-Pro",
+      "judge_model_used": "gpt-5.4",
+      "elapsed_minutes": 180.04220150311787,
+      "model_calls": 182,
+      "conservative_cost_usd_excluding_judge": 10.511568,
+      "end_reason_zh_CN": "host 正常退出，原生工作流报告完成；提交有效并评分。",
+      "score_path": "runs/smoke-20260923/episodes/discoverybench_agent_laboratory_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__agent_laboratory__N0__s0__r0__a78770e65/score.json",
+      "score_sha256": "5fe143220b543f5f4aaeac807e1fd21f3866eb2992040642343a0a9e91eef6c0",
+      "input_sha256": "8a85ad04997555dd31e958e1562caf0674cfe052c51f63960976ead38dbf219e",
+      "decomposition": {
+        "gold_count": 2,
+        "pred_count": 5,
+        "matched_count": 2,
+        "recall_context": 1.0,
+        "mean_accuracy": 0.0,
+        "recomputed_total": 0.0,
+        "gold_subhypotheses": [
+          {
+            "text": "Higher time preference is associated with higher BMI for 1989 data, with BMI positively related to whether a person spent more than their savings.",
+            "context": "Respondents in the NLSY79 dataset for 1989 data.",
+            "variables": [
+              "BMI",
+              "DISSAVED"
+            ],
+            "relations": "Positive relationship between DISSAVED and BMI, with coefficient 0.3596 in an OLS regression."
+          },
+          {
+            "text": "Higher time preference is associated with higher BMI for 1989 data, with BMI positively correlated with whether a person's savings remained unchanged.",
+            "context": "Respondents in the NLSY79 dataset for 1989 data.",
+            "variables": [
+              "BMI",
+              "SAMESAVE"
+            ],
+            "relations": "Positive relationship between SAMESAVE and BMI, with coefficient 0.4858 in an OLS regression."
+          }
+        ],
+        "pred_subhypotheses": [
+          {
+            "text": "Individuals in the 1989 NLS dataset with a latent time preference profile characterized by present-oriented financial behaviors exhibit higher BMI than future-oriented individuals.",
+            "context": "Respondents in the 1989 National Longitudinal Survey of Youth dataset.",
+            "variables": [
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI"
+            ],
+            "relations": "A composite time preference profile derived from dissaving and same/no saving behavior is positively associated with BMI; present-oriented individuals have higher BMI than future-oriented individuals."
+          },
+          {
+            "text": "The association between time preference and BMI is non-linear and is amplified at higher BMI levels.",
+            "context": "Respondents in the 1989 National Longitudinal Survey of Youth dataset, examined across BMI quantiles and higher BMI levels.",
+            "variables": [
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI"
+            ],
+            "relations": "The relationship between the composite time preference factor and BMI is non-linear, with stronger association at higher BMI levels; approximate quantile regression shows a trend slope of -0.0051."
+          },
+          {
+            "text": "The composite behavioral profile combining dissaving and inconsistent saving is a stronger predictor of BMI than either financial behavior alone.",
+            "context": "Respondents in the 1989 National Longitudinal Survey of Youth dataset.",
+            "variables": [
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI"
+            ],
+            "relations": "The combined measure based on DISSAVED and SAMESAVE predicts BMI more robustly than either individual financial variable alone."
+          },
+          {
+            "text": "The relationship between time preference and BMI persists after controlling for age, sex, race, and income.",
+            "context": "Respondents in the 1989 National Longitudinal Survey of Youth dataset after adjustment for demographic and socioeconomic controls.",
+            "variables": [
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI",
+              "AGE",
+              "GENDER",
+              "BLACK",
+              "HISPANIC",
+              "INCOME"
+            ],
+            "relations": "The positive association between the composite time preference measure and BMI remains after controlling for AGE, GENDER, BLACK, HISPANIC, and INCOME."
+          },
+          {
+            "text": "Placebo tests show that random shuffling of the time preference measure removes the meaningful association with BMI.",
+            "context": "Respondents in the 1989 National Longitudinal Survey of Youth dataset under placebo testing.",
+            "variables": [
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI"
+            ],
+            "relations": "When the composite time preference measure is randomly shuffled, the original association pattern with BMI is not retained, supporting that the observed relationship depends on the true time preference measure."
+          }
+        ],
+        "mapping": {
+          "0": 0,
+          "1": -1,
+          "2": 1,
+          "3": -1,
+          "4": -1
+        },
+        "pairs": [
+          {
+            "pair": "P0||G0",
+            "gold_variable_count": 3,
+            "pred_variable_count": 8,
+            "intersection": 3,
+            "variable_f1": 0.5454545454545454,
+            "relationship": 0.0,
+            "context": 1.0,
+            "accuracy": 0.0,
+            "relationship_judge_answer": "{\"answer\":\"C) different\",\"explanation\":\"HypoA states a clear positive linear relation between BMI and the two observed time-preference proxies separately (DISSAVED and SAMESAVE), with positive coefficients. HypoB instead emphasizes a composite latent time-preference profile, adds controls and subgroup analyses, and claims non-linearity with mixed evidence across BMI quantiles (trend slope = -0.0051). Because HypoB does not preserve HypoA’s specific positive linear relation for the same variables and instead proposes a different, more complex relation form, the relations are different.\"}",
+            "facet_uses_full_gold_hypothesis": true,
+            "facet_uses_full_pred_hypothesis": true
+          },
+          {
+            "pair": "P2||G1",
+            "gold_variable_count": 3,
+            "pred_variable_count": 8,
+            "intersection": 3,
+            "variable_f1": 0.5454545454545454,
+            "relationship": 0.0,
+            "context": 1.0,
+            "accuracy": 0.0,
+            "relationship_judge_answer": "{\"answer\":\"C) different\",\"explanation\":\"HypoA states a positive linear relation between BMI and each savings-behavior variable separately (DISSAVED and SAMESAVE, with positive coefficients). HypoB instead emphasizes a composite latent time-preference profile, claims stronger effects at higher BMI levels and non-linearity/quantile variation, and even reports a negative quantile trend slope. So the relation in HypoB is not the same as HypoA’s straightforward positive linear association.\"}",
+            "facet_uses_full_gold_hypothesis": true,
+            "facet_uses_full_pred_hypothesis": true
+          }
+        ]
+      },
+      "route": [],
+      "verification": [],
+      "task_runtime": {
+        "requests": 34,
+        "exit_codes": {
+          "1": 18,
+          "0": 12,
+          "124": 4
+        },
+        "nonzero_exit": 22,
+        "timeout_flag": 4,
+        "note": "External task-runtime requests, not model calls or independent experiments."
+      }
+    },
+    {
+      "episode_id": "discoverybench_agent_laboratory_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__agent_laboratory__R1__s0__r0__a78770e65",
+      "host": "agent_laboratory",
+      "condition": "R1",
+      "score": 0.10714285714285714,
+      "run_status": "completed",
+      "scoring_status": "scored",
+      "submission_status": "valid",
+      "model": "DeepSeek-V4-Pro",
+      "judge_model_used": "gpt-5.4",
+      "elapsed_minutes": 74.40852528413137,
+      "model_calls": 179,
+      "conservative_cost_usd_excluding_judge": 7.001526,
+      "end_reason_zh_CN": "host 正常退出，原生工作流报告完成；提交有效并评分。",
+      "score_path": "runs/smoke-20260923/episodes/discoverybench_agent_laboratory_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__agent_laboratory__R1__s0__r0__a78770e65/score.json",
+      "score_sha256": "8b826a1bd3c4aff18ff90098987494884ea0e9b7c742d2c4e56f322ef5b8b4d6",
+      "input_sha256": "8a85ad04997555dd31e958e1562caf0674cfe052c51f63960976ead38dbf219e",
+      "decomposition": {
+        "gold_count": 2,
+        "pred_count": 4,
+        "matched_count": 1,
+        "recall_context": 0.5,
+        "mean_accuracy": 0.21428571428571427,
+        "recomputed_total": 0.10714285714285714,
+        "gold_subhypotheses": [
+          {
+            "text": "For the 1989 NLSY79 data, BMI is positively related to whether a person spent more than their savings.",
+            "context": "National Longitudinal Survey of Youth (NLSY79) respondents in 1989",
+            "variables": [
+              "BMI",
+              "DISSAVED"
+            ],
+            "relations": "Positive relationship between DISSAVED and BMI; OLS coefficient 0.3596"
+          },
+          {
+            "text": "For the 1989 NLSY79 data, BMI is positively related to whether a person's savings remained unchanged or they had no savings.",
+            "context": "National Longitudinal Survey of Youth (NLSY79) respondents in 1989",
+            "variables": [
+              "BMI",
+              "SAMESAVE"
+            ],
+            "relations": "Positive relationship between SAMESAVE and BMI; OLS coefficient 0.4858"
+          }
+        ],
+        "pred_subhypotheses": [
+          {
+            "text": "In the 1989 NLSY data, DISSAVED is positively associated with BMI.",
+            "context": "Respondents in the 1989 NLSY dataset with complete cases.",
+            "variables": [
+              "DISSAVED",
+              "BMI"
+            ],
+            "relations": "Positive association between DISSAVED and BMI."
+          },
+          {
+            "text": "In the 1989 NLSY data, SAMESAVE is positively associated with BMI.",
+            "context": "Respondents in the 1989 NLSY dataset with complete cases.",
+            "variables": [
+              "SAMESAVE",
+              "BMI"
+            ],
+            "relations": "Positive association between SAMESAVE and BMI."
+          },
+          {
+            "text": "Income moderates the relationship between time-preference proxy variables and BMI in the 1989 NLSY data.",
+            "context": "Respondents in the 1989 NLSY dataset with complete cases.",
+            "variables": [
+              "INCOME",
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI"
+            ],
+            "relations": "Income significantly moderates the association between the time-preference proxies (DISSAVED, SAMESAVE) and BMI via interaction effects."
+          },
+          {
+            "text": "Age moderates the relationship between time-preference proxy variables and BMI in the 1989 NLSY data.",
+            "context": "Respondents in the 1989 NLSY dataset with complete cases.",
+            "variables": [
+              "AGE",
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI"
+            ],
+            "relations": "Age-based moderation of the association between the time-preference proxies (DISSAVED, SAMESAVE) and BMI via age × time-preference interaction terms."
+          }
+        ],
+        "mapping": {
+          "0": 0,
+          "1": -1,
+          "2": -1,
+          "3": -1
+        },
+        "pairs": [
+          {
+            "pair": "P0||G0",
+            "gold_variable_count": 3,
+            "pred_variable_count": 4,
+            "intersection": 3,
+            "variable_f1": 0.8571428571428571,
+            "relationship": 1.0,
+            "context": 1.0,
+            "accuracy": 0.8571428571428571,
+            "relationship_judge_answer": "{\"answer\":\"A) very similar\",\"explanation\":\"Both hypotheses state the same core relation: higher time preference proxies are positively associated with higher BMI in the 1989 NLSY data, specifically for DISSAVED and SAMESAVE. HypoA gives positive coefficients, while HypoB gives positive estimates with confidence intervals and adds moderation/limitations, but the main relation remains the same rather than more general or different.\"}",
+            "facet_uses_full_gold_hypothesis": true,
+            "facet_uses_full_pred_hypothesis": true
+          }
+        ]
+      },
+      "route": [
+        "literature_review",
+        "plan_formulation",
+        "data_preparation",
+        "running_experiments",
+        "results_interpretation",
+        "report_writing",
+        "report_refinement"
+      ],
+      "verification": [],
+      "task_runtime": {
+        "requests": 26,
+        "exit_codes": {
+          "1": 22,
+          "0": 4
+        },
+        "nonzero_exit": 22,
+        "timeout_flag": 0,
+        "note": "External task-runtime requests, not model calls or independent experiments."
+      }
+    },
+    {
+      "episode_id": "discoverybench_agent_laboratory_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__agent_laboratory__R3__s0__r0__a78770e65",
+      "host": "agent_laboratory",
+      "condition": "R3",
+      "score": 0.0,
+      "run_status": "completed",
+      "scoring_status": "scored",
+      "submission_status": "valid",
+      "model": "DeepSeek-V4-Pro",
+      "judge_model_used": "gpt-5.4",
+      "elapsed_minutes": 111.24592996438345,
+      "model_calls": 177,
+      "conservative_cost_usd_excluding_judge": 11.508442,
+      "end_reason_zh_CN": "host 报告终止状态 stop（host reports a terminal state），退出码 0；控制器标记 completed，提交有效并评分。",
+      "score_path": "runs/smoke-20260923/episodes/discoverybench_agent_laboratory_dev__discoverybench__train__nls_bmi_metadata_0_0_0_abca80ec__agent_laboratory__R3__s0__r0__a78770e65/score.json",
+      "score_sha256": "c9c240ce1437e07fd726723fe908f94092e52170cf67d115ca1aacc13f654b71",
+      "input_sha256": "8a85ad04997555dd31e958e1562caf0674cfe052c51f63960976ead38dbf219e",
+      "decomposition": {
+        "gold_count": 2,
+        "pred_count": 5,
+        "matched_count": 2,
+        "recall_context": 1.0,
+        "mean_accuracy": 0.0,
+        "recomputed_total": 0.0,
+        "gold_subhypotheses": [
+          {
+            "text": "Higher time preference is associated with higher BMI for 1989 data, with BMI positively related to whether a person spent more than their savings.",
+            "context": "National Longitudinal Survey of Youth (NLSY79) respondents in 1989.",
+            "variables": [
+              "BMI",
+              "DISSAVED"
+            ],
+            "relations": "Positive relationship: BMI increases when the person spent more than their savings (coefficient 0.3596)."
+          },
+          {
+            "text": "Higher time preference is associated with higher BMI for 1989 data, with BMI positively related to whether a person's savings remained unchanged.",
+            "context": "National Longitudinal Survey of Youth (NLSY79) respondents in 1989.",
+            "variables": [
+              "BMI",
+              "SAMESAVE"
+            ],
+            "relations": "Positive relationship: BMI increases when the person's savings remained unchanged (coefficient 0.4858)."
+          }
+        ],
+        "pred_subhypotheses": [
+          {
+            "text": "In the 1989 NLSY79 data, time preference—proxied by savings behavior—is negatively associated with BMI; future-oriented individuals (those who save rather than dissave) are expected to have lower BMI.",
+            "context": "Respondents in the 1989 NLSY79 dataset; time preference is proxied using savings behavior, comparing future-oriented savers versus non-future-oriented/dissavers.",
+            "variables": [
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI"
+            ],
+            "relations": "Negative association between future orientation from savings behavior and BMI; savers are expected to have lower BMI than dissavers."
+          },
+          {
+            "text": "Income is positively associated with future-oriented behavior.",
+            "context": "Respondents in the 1989 NLSY79 dataset.",
+            "variables": [
+              "INCOME",
+              "DISSAVED",
+              "SAMESAVE"
+            ],
+            "relations": "Positive association between income and future-oriented savings behavior."
+          },
+          {
+            "text": "Income influences BMI indirectly via time preference.",
+            "context": "Respondents in the 1989 NLSY79 dataset; mediation analysis of the income-BMI relationship through time preference.",
+            "variables": [
+              "INCOME",
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI"
+            ],
+            "relations": "Indirect mediation pathway: higher income is associated with greater future orientation, which is associated with lower BMI."
+          },
+          {
+            "text": "The negative relationship between future orientation and BMI persists after controlling for demographic factors.",
+            "context": "Respondents in the 1989 NLSY79 dataset, controlling for age, gender, and race.",
+            "variables": [
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI",
+              "INCOME",
+              "AGE",
+              "GENDER",
+              "BLACK",
+              "HISPANIC"
+            ],
+            "relations": "Future orientation negatively predicts BMI after adjustment for income, age, gender, black race, and hispanic ethnicity."
+          },
+          {
+            "text": "The relationship between future orientation and BMI holds across gender and racial groups.",
+            "context": "Subgroup analyses by gender and race within the 1989 NLSY79 dataset.",
+            "variables": [
+              "DISSAVED",
+              "SAMESAVE",
+              "BMI",
+              "GENDER",
+              "BLACK",
+              "HISPANIC"
+            ],
+            "relations": "The negative association between future orientation and BMI is robust across gender and racial subgroups."
+          }
+        ],
+        "mapping": {
+          "0": 0,
+          "1": 1,
+          "2": -1,
+          "3": -1,
+          "4": -1
+        },
+        "pairs": [
+          {
+            "pair": "P0||G0",
+            "gold_variable_count": 3,
+            "pred_variable_count": 8,
+            "intersection": 3,
+            "variable_f1": 0.5454545454545454,
+            "relationship": 0.0,
+            "context": 1.0,
+            "accuracy": 0.0,
+            "relationship_judge_answer": "{\"answer\":\"C) different\",\"explanation\":\"HypoA states a positive relationship between BMI and the time-preference proxies DISSAVED and SAMESAVE in the 1989 NLSY79 data. HypoB instead states a negative relationship between BMI and future orientation/time preference proxy (i.e., more future-oriented saving behavior predicts lower BMI), while also adding controls and mediation with income. Because the direction of the main BMI-time preference relation is opposite, HypoB does not exhibit the same relation as HypoA.\"}",
+            "facet_uses_full_gold_hypothesis": true,
+            "facet_uses_full_pred_hypothesis": true
+          },
+          {
+            "pair": "P1||G1",
+            "gold_variable_count": 3,
+            "pred_variable_count": 8,
+            "intersection": 3,
+            "variable_f1": 0.5454545454545454,
+            "relationship": 0.0,
+            "context": 1.0,
+            "accuracy": 0.0,
+            "relationship_judge_answer": "{\"answer\":\"C) different\",\"explanation\":\"HypoA states a positive relationship between BMI and the time-preference proxies DISSAVED and SAMESAVE in the 1989 data, based on linear regression coefficients. HypoB instead states a negative relationship between future orientation (constructed from savings behavior) and BMI, i.e. more future-oriented/saving behavior predicts lower BMI, while also adding controls, mediation, and subgroup claims. Since the direction of the main BMI–time preference relation is reversed relative to HypoA, the relations are different.\"}",
+            "facet_uses_full_gold_hypothesis": true,
+            "facet_uses_full_pred_hypothesis": true
+          }
+        ]
+      },
+      "route": [
+        "literature_review",
+        "plan_formulation",
+        "data_preparation",
+        "running_experiments",
+        "results_interpretation",
+        "report_writing",
+        "report_refinement"
+      ],
+      "verification": [
+        {
+          "hop": 0,
+          "verdict": "supported",
+          "checks": [
+            {
+              "name": "declared_writes_only",
+              "passed": true
+            },
+            {
+              "name": "artifact_changed",
+              "passed": true
+            },
+            {
+              "name": "nonempty_output",
+              "passed": true
+            }
+          ]
+        },
+        {
+          "hop": 1,
+          "verdict": "supported",
+          "checks": [
+            {
+              "name": "declared_writes_only",
+              "passed": true
+            },
+            {
+              "name": "artifact_changed",
+              "passed": true
+            },
+            {
+              "name": "nonempty_output",
+              "passed": true
+            }
+          ]
+        },
+        {
+          "hop": 2,
+          "verdict": "supported",
+          "checks": [
+            {
+              "name": "declared_writes_only",
+              "passed": true
+            },
+            {
+              "name": "artifact_changed",
+              "passed": true
+            },
+            {
+              "name": "nonempty_output",
+              "passed": true
+            }
+          ]
+        },
+        {
+          "hop": 3,
+          "verdict": "supported",
+          "checks": [
+            {
+              "name": "declared_writes_only",
+              "passed": true
+            },
+            {
+              "name": "artifact_changed",
+              "passed": true
+            },
+            {
+              "name": "nonempty_output",
+              "passed": true
+            }
+          ]
+        },
+        {
+          "hop": 4,
+          "verdict": "supported",
+          "checks": [
+            {
+              "name": "declared_writes_only",
+              "passed": true
+            },
+            {
+              "name": "artifact_changed",
+              "passed": true
+            },
+            {
+              "name": "nonempty_output",
+              "passed": true
+            }
+          ]
+        },
+        {
+          "hop": 5,
+          "verdict": "supported",
+          "checks": [
+            {
+              "name": "declared_writes_only",
+              "passed": true
+            },
+            {
+              "name": "benchmark_submission",
+              "passed": true
+            },
+            {
+              "name": "nonempty_output",
+              "passed": true
+            }
+          ]
+        },
+        {
+          "hop": 6,
+          "verdict": "supported",
+          "checks": [
+            {
+              "name": "declared_writes_only",
+              "passed": true
+            },
+            {
+              "name": "artifact_changed",
+              "passed": true
+            },
+            {
+              "name": "nonempty_output",
+              "passed": true
+            }
+          ]
+        }
+      ],
+      "task_runtime": {
+        "requests": 20,
+        "exit_codes": {
+          "1": 12,
+          "0": 7,
+          "124": 1
+        },
+        "nonzero_exit": 13,
+        "timeout_flag": 1,
+        "note": "External task-runtime requests, not model calls or independent experiments."
+      }
+    }
+  ],
+  "data_audit": {
+    "path": "prepared_tasks/discoverybench/train/nls_bmi/metadata_0/0/0/data/nls_bmi_processed.csv",
+    "sha256": "8a85ad04997555dd31e958e1562caf0674cfe052c51f63960976ead38dbf219e",
+    "rows": 12686,
+    "columns": [
+      "GENDER",
+      "AGE",
+      "AGE_2",
+      "INCOME",
+      "DISSAVED",
+      "SAMESAVE",
+      "BMI",
+      "BLACK",
+      "HISPANIC"
+    ],
+    "all_six_inputs_identical": true,
+    "groups": [
+      {
+        "DISSAVED": 0,
+        "SAMESAVE": 0,
+        "n": 4913,
+        "mean_bmi": 24.891005870818585
+      },
+      {
+        "DISSAVED": 0,
+        "SAMESAVE": 1,
+        "n": 4785,
+        "mean_bmi": 25.37680255739559
+      },
+      {
+        "DISSAVED": 1,
+        "SAMESAVE": 0,
+        "n": 2988,
+        "mean_bmi": 25.250627382056
+      }
+    ],
+    "simple_ols": {
+      "Intercept": 24.891005870818567,
+      "DISSAVED": 0.3596215112374185,
+      "SAMESAVE": 0.48579668657701885
+    },
+    "adjusted_ols": {
+      "Intercept": -1.9474451434397073,
+      "DISSAVED": 0.36138878427010146,
+      "SAMESAVE": 0.45850485258961077,
+      "AGE": 1.7406472536637874,
+      "AGE_2": -0.028851156158000435,
+      "GENDER": 0.8346796084811797,
+      "INCOME": 0.0008428668735856251,
+      "BLACK": 1.0512396299185491,
+      "HISPANIC": 1.1192193256753564
+    },
+    "future_orientation_ols": {
+      "Intercept": 20.62629979956482,
+      "future_oriented": -0.4312807131797606,
+      "INCOME": 0.0008216134421819565,
+      "AGE": 0.13634430786053914,
+      "GENDER": 0.831061028520752,
+      "BLACK": 1.0614054951681051,
+      "HISPANIC": 1.1254313692856668
+    },
+    "future_orientation_definition": "1 iff DISSAVED == 0 and SAMESAVE == 0, else 0",
+    "future_ols_note": "Raw income and age units; original agent standardized these covariates. This leaves the future_oriented coefficient unchanged.",
+    "gold_rounded_coefficients_reproduced": true,
+    "agent_r3_rounded_future_coefficient_reproduced": true,
+    "scientific_limit": "Only these OLS coefficients were independently recomputed. No verification of all reported tests, mediation, causal interpretation, figures, or p-values."
+  },
+  "scorer_audit": {
+    "discovery_revision": "c31fcf011e070f021a5f5b906896d0821f6880e8",
+    "lf_normalized_sha256": "83406ddbe6894429cc5012b17cb82a209d5397aa7863b0aba1bb51edf1dd6c65",
+    "facet_call_line": 423,
+    "facet_call_arguments": [
+      "query",
+      "gold_hypo",
+      "gold_workflow",
+      "gen_hypo",
+      "gen_workflow",
+      "dataset_meta",
+      "llm_used",
+      "context_score"
+    ],
+    "facets_use_whole_hypotheses_not_matched_subhypotheses": true,
+    "agent_r1_context_inconsistency": {
+      "gold_contexts_equal": true,
+      "pred_contexts_equal": true,
+      "mapping": {
+        "0": 0,
+        "1": -1,
+        "2": -1,
+        "3": -1
+      },
+      "limit": "Prompt also contains hypothesis text. False context responses are not retained; no repeat judging was performed."
+    },
+    "judge_protocol": {
+      "official_entrypoint_default": "gpt-4-1106-preview",
+      "current_run_judge": "gpt-5.4",
+      "decomposition_context_temperature": 1,
+      "decomposition_context_output_cap": 4096,
+      "official_facet_helper_temperature": 0,
+      "official_facet_helper_output_cap": 250,
+      "adapter_facet_temperature": 0,
+      "adapter_facet_output_cap": 512,
+      "note": "Official helper ignores the caller's 512 argument; adapter honors it. This does not establish the causal size of any score change."
+    },
+    "frozen_code_checks": [
+      {
+        "name": "policy.py",
+        "current_sha256": "ac9bfdc9d9cbc7b4bc8b2ef25d1f1a29de0e35021d82facdb5904d7b8416ebb9",
+        "frozen_sha256": "ac9bfdc9d9cbc7b4bc8b2ef25d1f1a29de0e35021d82facdb5904d7b8416ebb9",
+        "identical": true
+      },
+      {
+        "name": "benchmarks/scoring.py",
+        "current_sha256": "a049e67cf66f624304038e8493eb850dd300d3668e3455e8ec34ce680e9f15ef",
+        "frozen_sha256": "a049e67cf66f624304038e8493eb850dd300d3668e3455e8ec34ce680e9f15ef",
+        "identical": true
+      }
+    ]
+  },
+  "researchclawbench": {
+    "revision": "ed664513287a1fc60ae319e6bf7dbe7a62144135",
+    "source": "https://github.com/InternScience/ResearchClawBench/blob/ed664513287a1fc60ae319e6bf7dbe7a62144135/evaluation/score.py",
+    "local_download": "tmp/benchmark-analysis/researchclawbench-score.py",
+    "source_sha256": "57320c35099b6089305913ad3d72bf246ee7cb2814170a84d363853366b87d51",
+    "historical_raw_scores_available_in_this_audit": false,
+    "formula": "round(sum(item_weight * item_score) / sum(item_weight), 2); item_score: 0..100"
+  },
+  "validation": {
+    "six_original_score_files_equal_exports": true,
+    "five_numeric_scores_recomputed_exactly": true,
+    "one_invalid_submission_preserved_as_null": true,
+    "six_input_hashes_match": true,
+    "agent_laboratory_r1_r3_same_seven_step_route": true
+  }
+}

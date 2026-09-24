@@ -1,0 +1,18 @@
+{
+  "counts": {
+    "batches": 4,
+    "planned_records": 30,
+    "started_attempts": 17,
+    "status_records": 19,
+    "scored": 5,
+    "cancelled_before_start": 2,
+    "not_started_batch_aborted": 11,
+    "model_calls_recorded": 1355,
+    "conservative_cost_usd_recorded_excluding_judge": 105.07515800000002
+  },
+  "raw_score_json_exact_match_count": 16,
+  "csv_json_match": true,
+  "source_and_export_hashes_checked": true,
+  "credentials_excluded": true,
+  "prior_export_hash_verification_reused": true
+}

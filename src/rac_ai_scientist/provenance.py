@@ -8,6 +8,21 @@ IGNORED_PARTS = {".git", "__pycache__", ".pytest_cache"}
 IGNORED_SUFFIXES = {".pyc", ".pyo"}
 
 
+def expected_tree_hash(spec: dict, actual: str, *, packaged: bool = False, snapshot: bool = False) -> str | None:
+    """Choose an explicitly locked tree, never accept an unlisted runtime tree.
+
+    A packaged host may include pinned submodules or historical server patches;
+    a fresh checkout still has to match the canonical Git tree.
+    """
+    if packaged and (spec.get("runtime_tree_sha256") or spec.get("runtime_tree_sha256s")):
+        allowed = [spec["runtime_tree_sha256"]] if spec.get("runtime_tree_sha256") else []
+        allowed.extend(spec.get("runtime_tree_sha256s", []))
+        return actual if actual in allowed else allowed[0]
+    if snapshot and spec.get("snapshot_tree_sha256"):
+        return spec["snapshot_tree_sha256"]
+    return spec.get("tree_sha256")
+
+
 def _is_generated_package_metadata(relative: Path) -> bool:
     return any(part.endswith((".egg-info", ".dist-info")) for part in relative.parts)
 

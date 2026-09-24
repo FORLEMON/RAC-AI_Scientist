@@ -17,7 +17,7 @@ from rac_ai_scientist.schemas import Budget, Usage
 class EvoCleanupTests(unittest.TestCase):
     def test_evo_image_contains_analysis_dependencies_used_by_native_runs(self):
         dockerfile = (Path(__file__).parents[1] / 'docker/Dockerfile.evo-scientist').read_text()
-        install = next(line for line in dockerfile.splitlines() if 'pip install' in line)
+        install = ' '.join(line for line in dockerfile.splitlines() if 'pip install' in line)
         self.assertIn('matplotlib', install.split())
         self.assertIn('pandas', install.split())
         self.assertIn('python -m pip freeze > /opt/integration/evo-environment.txt', dockerfile)

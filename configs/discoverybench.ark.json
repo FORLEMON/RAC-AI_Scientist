@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "experiment_id": "discoverybench_ark_dev",
+  "benchmark": {
+    "id": "discoverybench",
+    "split": "train",
+    "profile": "real-no-domain-knowledge"
+  },
+  "hosts": [
+    "ark"
+  ],
+  "conditions": [
+    "N0",
+    "R1",
+    "R3"
+  ],
+  "tasks": ["nls_bmi/metadata_0/0/0"],
+  "seeds": [
+    0
+  ],
+  "repeats": 1,
+  "max_parallel_episodes": 1,
+  "model": {
+    "name": "DeepSeek-V4-Pro",
+    "api_key_env": "AGENT_API_KEY",
+    "api_base_env": "AGENT_API_BASE"
+  },
+  "judge": {
+    "enabled": true,
+    "name": "gpt-5.4",
+    "api_key_env": "JUDGE_API_KEY",
+    "api_base_env": "JUDGE_API_BASE"
+  },
+  "budget": {
+    "max_provider_cost_usd": 40,
+    "max_input_tokens": 100000000,
+    "max_output_tokens": 1800000,
+    "max_agent_calls": 1500,
+    "max_wall_seconds": 43200,
+    "max_hops": 23
+  },
+  "paths": {
+    "benchmark": "upstreams/discoverybench",
+    "prepared_tasks": "prepared_tasks",
+    "upstream_root": "upstreams",
+    "run_root": "runs"
+  },
+  "budget_provenance": {
+    "cost_override": "USD 40 per episode, explicitly set by the user for DiscoveryBench and CORE-Bench on 2026-09-22; supersedes the historical/example cost ceiling.",
+    "evidence": "recorded_ark_cell",
+    "reference": "Recorded ARK Math_000 N0 Pro queue ceiling, runbook section 5.2; max_hops updated from user screenshot.",
+    "scope": "Per episode lifecycle totals shared by N0, R1 and R3; not per-request generation limits.",
+    "new_benchmark_calibration": "Not yet performed; one smoke task selected, no live episode executed."
+  }
+}

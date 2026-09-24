@@ -41,6 +41,8 @@ def _ignored_artifact(relative: Path) -> bool:
 def artifact_kind(relative: Path) -> str:
     posix = relative.as_posix().lower()
     name = relative.name.lower()
+    if posix in {"discovery_result.json", "report.json"}:
+        return "terminal_submission"
     if posix == "report/report.md" or (relative.parts and relative.parts[0].lower() == "report" and relative.suffix.lower() in {".tex", ".pdf"}):
         return "terminal_report"
     if "literature_review" in name:
@@ -66,7 +68,7 @@ def snapshot_workspace(workspace: Path) -> list[ArtifactRecord]:
     workspace = workspace.resolve()
     records: list[ArtifactRecord] = []
     for path in sorted(workspace.rglob("*"), key=lambda item: item.as_posix()):
-        if not path.is_file():
+        if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(workspace):
             continue
         relative = path.relative_to(workspace)
         if _ignored_artifact(relative):
@@ -120,7 +122,7 @@ class WorkspaceTransaction:
 
     def _copy_tree(self, source: Path, destination: Path, *, skip_persistent: bool = False) -> None:
         for path in source.rglob("*"):
-            if not path.is_file():
+            if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(source.resolve()):
                 continue
             relative = path.relative_to(source)
             if skip_persistent and self._matches(relative, self._PERSISTENT_PATTERNS):
@@ -132,10 +134,11 @@ class WorkspaceTransaction:
     def rollback(self, *, preserve_patterns: tuple[str, ...] = ()) -> None:
         if self.workspace is None or self.backup is None:
             return
-        preserved_root = Path(self._temporary.name) / "preserved"  # type: ignore[union-attr]
-        preserved_root.mkdir()
+        # A verifier can roll back once with preserved artifacts, then a
+        # subsequent failure requires a full rollback from the same snapshot.
+        preserved_root = Path(tempfile.mkdtemp(prefix="preserved-", dir=self._temporary.name))  # type: ignore[union-attr]
         for path in self.workspace.rglob("*"):
-            if not path.is_file():
+            if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(self.workspace):
                 continue
             relative = path.relative_to(self.workspace)
             if self._matches(relative, preserve_patterns):

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "benchmarks": {
+    "discoverybench": {
+      "url": "https://github.com/allenai/discoverybench.git",
+      "revision": "c31fcf011e070f021a5f5b906896d0821f6880e8",
+      "directory": "upstreams/discoverybench",
+      "scorer_file": "eval/new_eval.py",
+      "scorer_lf_sha256": "83406ddbe6894429cc5012b17cb82a209d5397aa7863b0aba1bb51edf1dd6c65",
+      "profile": "real-no-domain-knowledge"
+    },
+    "corebench": {
+      "url": "https://github.com/princeton-pli/hal-harness.git",
+      "revision": "16bb03ebc11577fb5ea6dc8bb6c968387085e6aa",
+      "directory": "upstreams/hal_harness",
+      "scorer_file": "hal/benchmarks/corebench.py",
+      "scorer_lf_sha256": "c93daf73f81d74c8984a74feee802b3e0fb61d09366fc57ba3b90a44e2056900",
+      "profile": "hal-hard-cpu"
+    }
+  }
+}

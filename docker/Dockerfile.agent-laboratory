@@ -1,5 +1,5 @@
-# syntax=docker/dockerfile:1.7
-FROM python:3.11-slim
+ARG PYTHON_IMAGE=python:3.11-slim
+FROM ${PYTHON_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -19,7 +19,8 @@ COPY src /opt/integration/src
 COPY configs /opt/integration/configs
 COPY upstream.lock.json /opt/integration/upstream.lock.json
 
-RUN python -m pip install --no-cache-dir -r /opt/host/requirements.txt \
+RUN python -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu "torch==2.5.1+cpu" \
+    && python -m pip install --no-cache-dir -r /opt/host/requirements.txt \
     && python -m pip install --no-cache-dir \
         "pypdf>=5,<7" \
         "Flask>=3,<4" \
@@ -27,15 +28,19 @@ RUN python -m pip install --no-cache-dir -r /opt/host/requirements.txt \
         "tensorflow-cpu==2.18.0" \
     && python -m pip install --no-cache-dir --no-deps \
         "sentence-transformers==3.3.1" \
-    && python -m pip install --no-cache-dir -e /opt/integration
+    && python -m pip install --no-cache-dir -e /opt/integration \
+    && python -m pip check \
+    && python -m pip freeze > /opt/integration/agent-laboratory-environment.txt
 
-RUN mkdir -p /opt/huggingface-cache /opt/tiktoken-cache \
-    && python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" \
-    && python -c "import tiktoken; print(tiktoken.get_encoding('cl100k_base').name)"
-
+COPY --from=runtime_assets huggingface /opt/huggingface-cache
+COPY --from=runtime_assets tiktoken /opt/tiktoken-cache
 ENV HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1
 
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2', local_files_only=True)" \
+    && python -c "import tiktoken; print(tiktoken.get_encoding('cl100k_base').name)"
+
+COPY benchmark.lock.json /opt/integration/benchmark.lock.json
 WORKDIR /opt/integration
 ENTRYPOINT ["rac-ai-scientist"]
 CMD ["doctor-host", "--host", "agent_laboratory"]

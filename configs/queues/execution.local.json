@@ -1,0 +1,36 @@
+{
+  "global_parallelism": 2,
+  "host_order": ["evo_scientist", "ark", "agent_laboratory"],
+  "host_cpus": 2,
+  "host_memory": "4g",
+  "task_cpus": 3,
+  "task_memory": "3g",
+  "cpu_guard": {
+    "sample_seconds": 5,
+    "pause_above_percent": 90,
+    "overload_seconds": 20,
+    "resume_below_percent": 70,
+    "recovery_seconds": 10,
+    "max_pause_seconds": 20,
+    "cooldown_seconds": 20
+  },
+  "score_timeout": 1800,
+  "host_images": {
+    "ark": "rac-local/ark:validated",
+    "agent_laboratory": "rac-local/agent-laboratory:validated",
+    "evo_scientist": "rac-local/evo-scientist:validated"
+  },
+  "scorer_image": "rac-local/benchmark-scorer:smoke",
+  "task_runtime_image": "sha256:7253e3ee9ce1e9c5bdf778f63c1fb7f40a4a7b9f042eb5265dcfc9f25e3122a2",
+  "openhands_extensions": {
+    "path": "upstreams/openhands-extensions",
+    "revision": "47a8aa806d3ad2416ca3ee08c946558553413c83"
+  },
+  "pricing": {
+    "input_usd_per_million": 2.0,
+    "output_usd_per_million": 4.0,
+    "source": "Azure Retail Prices API, retrieved 2026-09-22; conservative rounding above commercial Azure Deepseek V4 Pro Global and DataZone meters; cached input charged as uncached.",
+    "evidence_file": "runs/preflight/azure-v4-prices.json",
+    "accounting": "Local conservative estimate, not a provider billing statement. A request reserves an input upper bound plus its maximum output before forwarding."
+  }
+}
