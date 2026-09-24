@@ -7,7 +7,15 @@ from unittest.mock import patch
 
 from rac_ai_scientist.bridge import HostBridge
 from rac_ai_scientist.schemas import InvocationResult
-from rac_ai_scientist.sharednet import RoomMessage, SharedNetInvite, SharedNetSession, _decode, load_sharednet_env
+from rac_ai_scientist.sharednet import (
+    MAX_FIELD_BYTES,
+    MAX_MESSAGE_BYTES,
+    RoomMessage,
+    SharedNetInvite,
+    SharedNetSession,
+    _decode,
+    load_sharednet_env,
+)
 
 
 class FakeRoomClient:
@@ -58,6 +66,21 @@ class FakeRoomClient:
                 content,
             )
         )
+
+
+class SizeRejectingFakeRoomClient(FakeRoomClient):
+    size_rejections_remaining = 0
+
+    @classmethod
+    def reset(cls):
+        super().reset()
+        cls.size_rejections_remaining = 0
+
+    def send(self, content, *, reply_to=None):
+        if type(self).size_rejections_remaining:
+            type(self).size_rejections_remaining -= 1
+            raise ValueError(f"SharedNet message exceeds {MAX_MESSAGE_BYTES} bytes")
+        return super().send(content, reply_to=reply_to)
 
 
 class SharedNetTests(unittest.TestCase):
@@ -138,6 +161,82 @@ class SharedNetTests(unittest.TestCase):
         next_prompt = session.request("experimenter", 1, "run experiments", None)
 
         self.assertIn("also test the low-noise subset", next_prompt)
+
+    def test_unicode_request_and_result_are_bounded_by_encoded_bytes(self):
+        invite = SharedNetInvite.parse(
+            f"ROOM=rom_bounded TOKEN=rit_{'a' * 43}",
+            room_id="rom_bounded",
+        )
+        session = SharedNetSession(
+            invite,
+            "episode-bounded",
+            ("researcher",),
+            client_factory=FakeRoomClient,
+        )
+        session.join()
+        prompt = "研究🧪" * 20000
+        self.assertEqual(session.request("researcher", 0, prompt, "contract-0"), prompt)
+        session.result(
+            "researcher",
+            0,
+            "结果📈" * 20000,
+            None,
+            error="异常🔥" * 10000,
+        )
+
+        self.assertEqual(len(FakeRoomClient.messages_log), 2)
+        for message in FakeRoomClient.messages_log:
+            self.assertLessEqual(len(message.content.encode("utf-8")), MAX_MESSAGE_BYTES)
+            _, envelope = _decode(message.content)
+            self.assertTrue(envelope["truncated"])
+            self.assertRegex(envelope["text_sha256"], r"^[0-9a-f]{64}$")
+        _, result_envelope = _decode(FakeRoomClient.messages_log[-1].content)
+        self.assertTrue(result_envelope["fields_truncated"])
+        self.assertLessEqual(len(result_envelope["error"].encode("utf-8")), MAX_FIELD_BYTES)
+
+    def test_size_rejection_uses_compact_fallback_without_stopping(self):
+        SizeRejectingFakeRoomClient.reset()
+        invite = SharedNetInvite.parse(
+            f"ROOM=rom_fallback TOKEN=rit_{'a' * 43}",
+            room_id="rom_fallback",
+        )
+        session = SharedNetSession(
+            invite,
+            "episode-fallback",
+            ("researcher",),
+            client_factory=SizeRejectingFakeRoomClient,
+        )
+        session.join()
+        session.request("researcher", 0, "do work", None)
+        SizeRejectingFakeRoomClient.size_rejections_remaining = 1
+
+        session.result("researcher", 0, "complete result", None)
+
+        _, envelope = _decode(SizeRejectingFakeRoomClient.messages_log[-1].content)
+        self.assertEqual(envelope["type"], "work.result")
+        self.assertTrue(envelope["publish_fallback"])
+        self.assertEqual(session.publish_warnings, [])
+
+    def test_two_size_rejections_warn_but_do_not_raise(self):
+        SizeRejectingFakeRoomClient.reset()
+        invite = SharedNetInvite.parse(
+            f"ROOM=rom_omit TOKEN=rit_{'a' * 43}",
+            room_id="rom_omit",
+        )
+        session = SharedNetSession(
+            invite,
+            "episode-omit",
+            ("researcher",),
+            client_factory=SizeRejectingFakeRoomClient,
+        )
+        session.join()
+        session.request("researcher", 0, "do work", None)
+        SizeRejectingFakeRoomClient.size_rejections_remaining = 2
+
+        with self.assertWarns(RuntimeWarning):
+            session.result("researcher", 0, "complete result", None)
+
+        self.assertEqual(len(session.publish_warnings), 1)
 
     def test_verification_is_advisory_context_for_next_agent(self):
         invite = SharedNetInvite.parse(

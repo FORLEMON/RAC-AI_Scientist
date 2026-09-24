@@ -8,11 +8,13 @@ episode metadata or coordination ledgers.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -24,6 +26,8 @@ BASE_RE = re.compile(r"\bBASE=(\S+)")
 URL_ROOM_RE = re.compile(r"https?://[^\s/]+(?:/[^\s]*)?/rooms/(rom_[A-Za-z0-9]+)")
 TRAILER = "sharednet-rac: "
 MAX_MESSAGE_BYTES = 32768
+MAX_FIELD_BYTES = 4096
+RESULT_SUMMARY_BYTES = 20000
 SHAREDNET_ENV_KEYS = {"SHAREDNET_BASE_URL", "SHAREDNET_INVITE", "SHAREDNET_ROOM_ID"}
 
 
@@ -231,6 +235,89 @@ def _encode(text: str, event_type: str, fields: dict[str, Any]) -> str:
     return f"{text.rstrip()}\n\n{TRAILER}{envelope}"
 
 
+def _truncate_utf8(text: str, max_bytes: int) -> str:
+    """Keep a UTF-8-safe head and tail within an exact byte allowance."""
+    if max_bytes <= 0:
+        return ""
+    raw = (text or "").encode("utf-8")
+    if len(raw) <= max_bytes:
+        return text or ""
+    marker = "\n\n… content elided …\n\n".encode("utf-8")
+    if len(marker) >= max_bytes:
+        return raw[:max_bytes].decode("utf-8", errors="ignore")
+    available = max_bytes - len(marker)
+    head_bytes = (available * 3) // 4
+    tail_bytes = available - head_bytes
+    head = raw[:head_bytes].decode("utf-8", errors="ignore")
+    tail = raw[-tail_bytes:].decode("utf-8", errors="ignore") if tail_bytes else ""
+    value = f"{head}{marker.decode('utf-8')}{tail}"
+    # Dropping an incomplete boundary byte can leave a small amount of spare
+    # capacity, but must never make the result exceed the caller's allowance.
+    while len(value.encode("utf-8")) > max_bytes:
+        value = value[:-1]
+    return value
+
+
+def _compact_fields(fields: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    compact = dict(fields)
+    changed = False
+    for key, value in tuple(compact.items()):
+        if isinstance(value, str) and len(value.encode("utf-8")) > MAX_FIELD_BYTES:
+            compact[key] = _truncate_utf8(value, MAX_FIELD_BYTES)
+            changed = True
+    return compact, changed
+
+
+def _encode_limited(text: str, event_type: str, fields: dict[str, Any]) -> str:
+    """Encode one typed event without exceeding SharedNet's byte limit.
+
+    Full host output remains in the episode workspace and coordination ledger;
+    only the Room hand-off is compacted.  The digest lets operators correlate a
+    compact message with the complete local record.
+    """
+    original = (text or "").strip() or "(no output)"
+    encoded = _encode(original, event_type, fields)
+    if len(encoded.encode("utf-8")) <= MAX_MESSAGE_BYTES:
+        return encoded
+
+    compact_fields, fields_changed = _compact_fields(fields)
+    compact_fields.update(
+        {
+            "truncated": True,
+            "fields_truncated": fields_changed,
+            "original_text_bytes": len(original.encode("utf-8")),
+            "text_sha256": hashlib.sha256(original.encode("utf-8")).hexdigest(),
+        }
+    )
+    overhead = len(_encode("", event_type, compact_fields).encode("utf-8"))
+    allowance = max(0, MAX_MESSAGE_BYTES - overhead)
+    compact_text = _truncate_utf8(original, allowance)
+    encoded = _encode(compact_text, event_type, compact_fields)
+    if len(encoded.encode("utf-8")) <= MAX_MESSAGE_BYTES:
+        return encoded
+
+    # This should only be reachable if future fields contain large non-string
+    # values.  Preserve the routing identity and digest in a minimal envelope.
+    minimal = {
+        key: compact_fields[key]
+        for key in ("episode_id", "hop", "role", "to", "proposed_next", "status")
+        if key in compact_fields
+    }
+    minimal.update(
+        {
+            "truncated": True,
+            "fields_truncated": fields_changed or len(minimal) != len(fields),
+            "original_text_bytes": len(original.encode("utf-8")),
+            "text_sha256": hashlib.sha256(original.encode("utf-8")).hexdigest(),
+        }
+    )
+    overhead = len(_encode("", event_type, minimal).encode("utf-8"))
+    encoded = _encode(_truncate_utf8(original, max(0, MAX_MESSAGE_BYTES - overhead)), event_type, minimal)
+    if len(encoded.encode("utf-8")) > MAX_MESSAGE_BYTES:
+        raise ValueError("typed SharedNet envelope cannot fit within the message limit")
+    return encoded
+
+
 def _decode(content: str) -> tuple[str, dict[str, Any] | None]:
     lines = content.rstrip().splitlines()
     if not lines or not lines[-1].startswith(TRAILER):
@@ -242,11 +329,13 @@ def _decode(content: str) -> tuple[str, dict[str, Any] | None]:
     return "\n".join(lines[:-1]).strip(), envelope if isinstance(envelope, dict) else None
 
 
-def _summarize(output: str, head: int = 5000, tail: int = 1500) -> str:
-    text = (output or "").strip() or "(no output)"
-    if len(text) <= head + tail:
-        return text
-    return f"{text[:head]}\n\n… {len(text) - head - tail} chars elided …\n\n{text[-tail:]}"
+def _summarize(output: str) -> str:
+    return _truncate_utf8((output or "").strip() or "(no output)", RESULT_SUMMARY_BYTES)
+
+
+def _is_message_size_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return any(marker in message for marker in ("exceed", "too large", "payload too large", "http 413"))
 
 
 class SharedNetSession:
@@ -271,6 +360,7 @@ class SharedNetSession:
         self.previous_role = ""
         self.previous_disposition = ""
         self._requests: dict[int, str] = {}
+        self.publish_warnings: list[str] = []
 
     @property
     def room_id(self) -> str:
@@ -303,6 +393,62 @@ class SharedNetSession:
                 guidance.append(f"{message.sender_name or message.sender_id}: {text}")
         return guidance
 
+    def _send_typed(
+        self,
+        client: RoomClient,
+        text: str,
+        event_type: str,
+        fields: dict[str, Any],
+        *,
+        reply_to: str | None = None,
+    ) -> RoomMessage | None:
+        """Publish a bounded event, degrading only message-size failures.
+
+        Authentication, connectivity, and other Room errors remain fatal.  A
+        size rejection is different: host work has already completed and is
+        durably recorded locally, so a compact coordination fallback must not
+        turn that completed work into an episode failure.
+        """
+        try:
+            return client.send(
+                _encode_limited(text, event_type, fields),
+                reply_to=reply_to,
+            )
+        except Exception as error:
+            if not _is_message_size_error(error):
+                raise
+
+        minimal = {
+            key: value
+            for key, value in fields.items()
+            if key in {"episode_id", "hop", "role", "to", "proposed_next", "status"}
+        }
+        minimal.update(
+            {
+                "truncated": True,
+                "publish_fallback": True,
+                "original_text_bytes": len((text or "").encode("utf-8")),
+                "text_sha256": hashlib.sha256((text or "").encode("utf-8")).hexdigest(),
+            }
+        )
+        try:
+            return client.send(
+                _encode_limited(
+                    "Full coordination text was retained in the local episode ledger; "
+                    "this Room event is a size-safe fallback.",
+                    event_type,
+                    minimal,
+                ),
+                reply_to=reply_to,
+            )
+        except Exception as error:
+            if not _is_message_size_error(error):
+                raise
+            warning = f"SharedNet {event_type} publication omitted after two size rejections: {error}"
+            self.publish_warnings.append(warning)
+            warnings.warn(warning, RuntimeWarning, stacklevel=2)
+            return None
+
     def request(self, role: str, hop: int, prompt: str, contract_id: str | None) -> str:
         if self.coordinator is None:
             raise RuntimeError("SharedNet session has not joined its Room")
@@ -314,8 +460,14 @@ class SharedNetSession:
         }
         if contract_id:
             fields["contract_id"] = contract_id
-        request = self.coordinator.send(_encode(f"@{role} hop {hop}\n\n{prompt}", "work.request", fields))
-        self._requests[hop] = request.message_id
+        request = self._send_typed(
+            self.coordinator,
+            f"@{role} hop {hop}\n\n{prompt}",
+            "work.request",
+            fields,
+        )
+        if request is not None:
+            self._requests[hop] = request.message_id
         context: list[str] = []
         if self.previous_result:
             context.append(f"Previous team member ({self.previous_role}) reported:\n{self.previous_result}")
@@ -337,49 +489,53 @@ class SharedNetSession:
             "error": error,
             "status": "awaiting_verification",
         }
-        member.send(
-            _encode(_summarize(output), "work.result", fields),
+        summary = _summarize(output)
+        self._send_typed(
+            member,
+            output,
+            "work.result",
+            fields,
             reply_to=self._requests.get(hop),
         )
         # Sending must not advance the read cursor: guidance can arrive while an
         # agent is working, before its result message receives a later sequence.
-        self.previous_result = _summarize(output)
+        self.previous_result = summary
         self.previous_role = role
 
     def disposition(self, hop: int, *, accepted: bool, reason: str, next_role: str | None) -> None:
         if self.coordinator is None:
             return
         event = "work.accepted" if accepted else "work.rejected"
-        self.previous_disposition = f"{'accepted' if accepted else 'rejected'}: {reason}"
-        self.coordinator.send(
-            _encode(
-                f"Hop {hop} {'accepted' if accepted else 'rejected'}: {reason}",
-                event,
-                {
-                    "episode_id": self.episode_id,
-                    "hop": hop,
-                    "next": next_role,
-                    "reason": reason,
-                },
-            )
+        compact_reason = _truncate_utf8(reason, MAX_FIELD_BYTES)
+        self.previous_disposition = f"{'accepted' if accepted else 'rejected'}: {compact_reason}"
+        self._send_typed(
+            self.coordinator,
+            f"Hop {hop} {'accepted' if accepted else 'rejected'}: {compact_reason}",
+            event,
+            {
+                "episode_id": self.episode_id,
+                "hop": hop,
+                "next": next_role,
+                "reason": compact_reason,
+            },
         )
 
     def verification(self, hop: int, *, verdict: str, reason: str, next_role: str | None) -> None:
         """Publish a non-blocking verifier result for the next selected agent."""
         if self.coordinator is None:
             return
-        self.previous_disposition = f"verification advisory ({verdict}): {reason}"
-        self.coordinator.send(
-            _encode(
-                f"Hop {hop} verification advisory ({verdict}): {reason}",
-                "work.verification",
-                {
-                    "episode_id": self.episode_id,
-                    "hop": hop,
-                    "next": next_role,
-                    "verdict": verdict,
-                    "advisory": True,
-                    "reason": reason,
-                },
-            )
+        compact_reason = _truncate_utf8(reason, MAX_FIELD_BYTES)
+        self.previous_disposition = f"verification advisory ({verdict}): {compact_reason}"
+        self._send_typed(
+            self.coordinator,
+            f"Hop {hop} verification advisory ({verdict}): {compact_reason}",
+            "work.verification",
+            {
+                "episode_id": self.episode_id,
+                "hop": hop,
+                "next": next_role,
+                "verdict": verdict,
+                "advisory": True,
+                "reason": compact_reason,
+            },
         )
