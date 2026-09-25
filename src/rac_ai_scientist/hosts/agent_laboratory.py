@@ -9,6 +9,7 @@ import re
 import shutil
 import sys
 import time
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -366,7 +367,12 @@ def _install_arxiv_transport(workspace: Path | None = None) -> int:
                 return "\n\n".join(summaries)
             papers = original_search(search, query, N)
             if papers is None:
-                raise RuntimeError("arXiv API search failed after native retries")
+                warnings.warn(
+                    "arXiv API search failed after native retries; "
+                    "continuing Agent Laboratory with an empty search result",
+                    RuntimeWarning,
+                )
+                return ""
             return papers
 
         find_papers_by_str._rac_error = True

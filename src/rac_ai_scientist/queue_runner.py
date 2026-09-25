@@ -28,6 +28,28 @@ from .resource_control import CpuGovernor
 HOSTS = ('evo_scientist', 'ark', 'agent_laboratory')
 
 
+def ensure_task_spec(source: Path, target: Path) -> None:
+    """Install the immutable controller spec without rewriting a host-owned copy."""
+    expected = digest(source)
+    if target.exists():
+        if not target.is_file() or digest(target) != expected:
+            raise ValueError(f'episode task spec differs from prepared input: {target}')
+        return
+    shutil.copy2(source, target)
+
+
+def ensure_episode_metadata(path: Path, fallback: dict, required: dict) -> dict:
+    """Keep valid host metadata in place, avoiding writes to root-owned files."""
+    try:
+        current = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        current = fallback
+    desired = {**current, **required}
+    if desired != current:
+        write_json(path, desired)
+    return desired
+
+
 def dotenv(path):
     result = {}
     for raw in path.read_text(encoding='utf-8').splitlines():
@@ -354,15 +376,14 @@ class QueueRunner:
         try:
             episode.mkdir(parents=True, exist_ok=True)
             spec_source = self.root / row['task_dir'] / 'task_spec.json'
-            shutil.copy2(spec_source, episode / 'task_spec.json')
+            ensure_task_spec(spec_source, episode / 'task_spec.json')
             metadata_path = episode / 'episode.json'
-            try:
-                metadata = json.loads(metadata_path.read_text())
-            except (OSError, ValueError):
-                metadata = {'status': 'failed', 'reason': result.get('error', 'host did not produce metadata')}
-            metadata.update(episode_id=row['episode_id'], benchmark_id=row['benchmark_id'], task_id=row['task_id'],
-                task_spec_sha256=digest(spec_source), host=row['host'], condition=row['condition'])
-            write_json(metadata_path, metadata)
+            ensure_episode_metadata(
+                metadata_path,
+                {'status': 'failed', 'reason': result.get('error', 'host did not produce metadata')},
+                dict(episode_id=row['episode_id'], benchmark_id=row['benchmark_id'], task_id=row['task_id'],
+                     task_spec_sha256=digest(spec_source), host=row['host'], condition=row['condition']),
+            )
             score_env = {**os.environ, **{k: v for k, v in self.env.items() if k.startswith('JUDGE_')}}
             command = self.base_command(name + '-score', cpuset_cpus=row.get('cpuset_cpus'))
             command += ['--mount', f'type=bind,source={episode},target={episode}',

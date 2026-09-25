@@ -71,7 +71,7 @@ class AgentLaboratoryArxivTests(unittest.TestCase):
             self.assertEqual(client._session.get("https://export.arxiv.org/api/query"), "https://export.arxiv.org/api/query")
             self.assertEqual(client._session.inner.timeout, (5, 30))
 
-    def test_failed_search_surfaces_error_but_empty_results_are_valid(self):
+    def test_failed_search_is_skipped_as_an_empty_result(self):
         arxiv = types.ModuleType("arxiv")
         arxiv.Client = type("Client", (FakeClient,), {})
         tools = types.ModuleType("tools")
@@ -79,8 +79,8 @@ class AgentLaboratoryArxivTests(unittest.TestCase):
         with patch.dict(sys.modules, {"arxiv": arxiv, "tools": tools}):
             _install_arxiv_transport()
             search = tools.ArxivSearch()
-            with self.assertRaisesRegex(RuntimeError, "arXiv API search failed"):
-                search.find_papers_by_str("query")
+            with self.assertWarnsRegex(RuntimeWarning, "continuing Agent Laboratory"):
+                self.assertEqual(search.find_papers_by_str("query"), "")
             search.result = ""
             self.assertEqual(search.find_papers_by_str("query"), "")
 

@@ -11,7 +11,7 @@ import urllib.error
 from unittest.mock import patch
 
 from rac_ai_scientist.model_gateway import Account, BudgetExceeded, ModelGateway, ProviderError, Redactor, sse_response
-from rac_ai_scientist.queue_runner import QueueRunner, run_logged
+from rac_ai_scientist.queue_runner import QueueRunner, ensure_episode_metadata, ensure_task_spec, run_logged
 from rac_ai_scientist.benchmarks.scoring import DiscoveryJudge
 
 
@@ -92,6 +92,35 @@ class BudgetTests(unittest.TestCase):
 
 
 class QueueFailureTests(unittest.TestCase):
+    def test_existing_identical_read_only_task_spec_is_reused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, target = root / 'source.json', root / 'target.json'
+            source.write_text('{"task":"same"}', encoding='utf-8')
+            target.write_text('{"task":"same"}', encoding='utf-8')
+            target.chmod(0o444)
+            ensure_task_spec(source, target)
+            self.assertEqual(target.read_text(encoding='utf-8'), source.read_text(encoding='utf-8'))
+
+    def test_existing_different_task_spec_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, target = root / 'source.json', root / 'target.json'
+            source.write_text('{"task":"expected"}', encoding='utf-8')
+            target.write_text('{"task":"different"}', encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'differs from prepared input'):
+                ensure_task_spec(source, target)
+
+    def test_identical_episode_metadata_is_not_rewritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'episode.json'
+            metadata = {'episode_id': 'e', 'host': 'agent_laboratory'}
+            path.write_text(json.dumps(metadata), encoding='utf-8')
+            path.chmod(0o444)
+            with patch('rac_ai_scientist.queue_runner.write_json') as write:
+                self.assertEqual(ensure_episode_metadata(path, {}, metadata), metadata)
+            write.assert_not_called()
+
     def test_output_logs_redact_credentials_and_survive_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             logs = Path(directory)
