@@ -39,7 +39,10 @@ class DiscoveryJudge:
         max_tokens = self.max_completion_tokens if max_tokens is None else max_tokens
         options = dict(model=self.model, messages=messages)
         if self.model.rsplit("/", 1)[-1].startswith("gpt-5"):
-            options["max_completion_tokens"] = max_tokens
+            # DiscoveryBench's 256/512-token limits target non-reasoning chat
+            # models. GPT-5 counts hidden reasoning against the same limit and
+            # can otherwise reach `length` before emitting any JSON at all.
+            options["max_completion_tokens"] = max(max_tokens, self.max_completion_tokens)
             # Current GPT-5 Azure deployments accept only their default
             # temperature. Upstream DiscoveryBench requests temperature=0,
             # so forwarding it turns an otherwise valid score into HTTP 400.
