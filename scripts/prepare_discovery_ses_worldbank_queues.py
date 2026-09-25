@@ -22,10 +22,10 @@ TASKS = (
     "worldbank_education_gdp/metadata_0/0/0",
 )
 LANES = (
-    ("evo_scientist", TASKS[0], "configs/discoverybench.nls_ses.evo_scientist.json"),
-    ("evo_scientist", TASKS[1], "configs/discoverybench.worldbank_education_gdp.evo_scientist.json"),
-    ("agent_laboratory", TASKS[0], "configs/discoverybench.nls_ses.agent_laboratory.json"),
-    ("agent_laboratory", TASKS[1], "configs/discoverybench.worldbank_education_gdp.agent_laboratory.json"),
+    ("evo_scientist", TASKS[0], "configs/discoverybench.nls_ses.evo_scientist.json", "2-7"),
+    ("evo_scientist", TASKS[1], "configs/discoverybench.worldbank_education_gdp.evo_scientist.json", "8-13"),
+    ("agent_laboratory", TASKS[0], "configs/discoverybench.nls_ses.agent_laboratory.json", "14-19"),
+    ("agent_laboratory", TASKS[1], "configs/discoverybench.worldbank_education_gdp.agent_laboratory.json", "20-25"),
 )
 
 
@@ -103,7 +103,7 @@ def main() -> int:
     sharednet_root = plan_root / "sharednet"
     sharednet_root.mkdir(parents=True)
     queue_files = []
-    for host, task_id, config_name in LANES:
+    for host, task_id, config_name, cpuset_cpus in LANES:
         config_path = root / config_name
         config = load_config(config_path)
         blockers = [item.message for item in validate_config(config, root) if item.level in {"ERROR", "BLOCKED"}]
@@ -119,6 +119,7 @@ def main() -> int:
             "manifest_kind": "queue_plan_only",
             "queue_id": queue_id,
             "host": host,
+            "resources": {"cpus": 6, "cpuset_cpus": cpuset_cpus},
             "path_base": "repository_root",
             "environment_file": str(root / ".env"),
             "policy": {
@@ -139,10 +140,8 @@ def main() -> int:
         "queue_files": queue_files,
         "run_root": str(work_root / "runs"),
         "host_cpus": 6,
-        "host_cpuset_cpus": "2-7",
         "host_memory": "4g",
         "task_cpus": 6,
-        "task_cpuset_cpus": "2-7",
         "task_memory": "2g",
         "cpu_guard": {
             "sample_seconds": 5, "pause_above_percent": 90, "overload_seconds": 20,

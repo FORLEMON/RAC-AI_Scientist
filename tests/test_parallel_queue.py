@@ -69,6 +69,13 @@ class ParallelQueueTests(unittest.TestCase):
         self.assertEqual(command[command.index('--cpuset-cpus') + 1], '2-7')
         self.assertIn('DAC_OVERRIDE', command)
 
+    def test_lane_cpu_affinity_overrides_global_default(self):
+        runner = QueueRunner.__new__(QueueRunner)
+        runner.settings = {'host_cpus': 6, 'host_cpuset_cpus': '2-7', 'host_memory': '4g'}
+        runner.source = Path('/source')
+        command = runner.base_command('test', cpuset_cpus='20-25')
+        self.assertEqual(command[command.index('--cpuset-cpus') + 1], '20-25')
+
     def test_two_lanes_preserve_condition_order_host_barrier_and_continue_after_error(self):
         runner=QueueRunner.__new__(QueueRunner)
         runner.settings={'global_parallelism':2}

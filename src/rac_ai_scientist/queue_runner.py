@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -139,8 +140,11 @@ class QueueRunner:
                     or policy.get('continue_on_scoring_error') is not True
                     or policy.get('retry_automatically') is not False):
                 raise ValueError(f'unsafe queue policy in {queue_path}')
+            queue_cpuset = queue.get('resources', {}).get('cpuset_cpus')
+            if queue_cpuset is not None and not re.fullmatch(r'\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*', queue_cpuset):
+                raise ValueError(f'invalid queue CPU set in {queue_path}')
             for item in queue['episodes']:
-                row = dict(item, host=host, lane_id=queue['queue_id'])
+                row = dict(item, host=host, lane_id=queue['queue_id'], cpuset_cpus=queue_cpuset)
                 config_path = self.root / row['config']
                 config = load_config(config_path)
                 blockers = [f for f in validate_config(config, self.root) if f.level in {'ERROR', 'BLOCKED'}]
@@ -252,7 +256,7 @@ class QueueRunner:
     def remove(self, name):
         subprocess.run(['docker', 'rm', '-f', name], capture_output=True, timeout=40)
 
-    def base_command(self, name):
+    def base_command(self, name, *, cpuset_cpus=None):
         command = ['docker', 'run', '--rm', '--name', name, '--init', '--cpus', str(self.settings['host_cpus']),
                 '--memory', self.settings['host_memory'], '--pids-limit', '1024',
                 '--security-opt', 'no-new-privileges', '--cap-drop', 'ALL',
@@ -260,7 +264,7 @@ class QueueRunner:
                 '--mount', f'type=bind,source={self.source},target=/opt/integration/src,readonly',
                 '--env', 'PYTHONPATH=/opt/integration/src', '--env', 'PYTHONUNBUFFERED=1',
                 '--env', 'PYTHONDONTWRITEBYTECODE=1']
-        if cpuset := self.settings.get('host_cpuset_cpus'):
+        if cpuset := (cpuset_cpus or self.settings.get('host_cpuset_cpus')):
             command[command.index('--memory'):command.index('--memory')] = ['--cpuset-cpus', cpuset]
         return command
 
@@ -280,7 +284,8 @@ class QueueRunner:
         try:
             runtime = DockerTaskRuntime(episode / 'workspace', self.runtime_image, logs / 'task-runtime',
                 wall_seconds=row['budget']['max_wall_seconds'], memory=self.settings['task_memory'],
-                cpus=self.settings['task_cpus'], cpuset_cpus=self.settings.get('task_cpuset_cpus'), bind=self.bridge_ip)
+                cpus=self.settings['task_cpus'],
+                cpuset_cpus=row.get('cpuset_cpus') or self.settings.get('task_cpuset_cpus'), bind=self.bridge_ip)
             client = runtime.start()
             self.redact.values.add(runtime.token)
             result['task_container'] = runtime.name
@@ -296,7 +301,7 @@ class QueueRunner:
                 room = load_sharednet_env(self.root / row['sharednet_env_file'])
                 host_env.update(room)
                 passed += list(room)
-            command = self.base_command(name)
+            command = self.base_command(name, cpuset_cpus=row.get('cpuset_cpus'))
             if row['host'] == 'ark':
                 conversations = logs / 'openhands'
                 conversations.mkdir(exist_ok=True)
@@ -359,7 +364,7 @@ class QueueRunner:
                 task_spec_sha256=digest(spec_source), host=row['host'], condition=row['condition'])
             write_json(metadata_path, metadata)
             score_env = {**os.environ, **{k: v for k, v in self.env.items() if k.startswith('JUDGE_')}}
-            command = self.base_command(name + '-score')
+            command = self.base_command(name + '-score', cpuset_cpus=row.get('cpuset_cpus'))
             command += ['--mount', f'type=bind,source={episode},target={episode}',
                         '--mount', f'type=bind,source={self.root / row["scorer_source"]},target=/private/benchmark,readonly']
             if row['scorer_dataset']:
