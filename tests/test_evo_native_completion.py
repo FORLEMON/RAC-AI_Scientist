@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from rac_ai_scientist.benchmarks.base import TaskSpec
+from rac_ai_scientist.benchmarks.discoverybench import REVISION as DISCOVERYBENCH_REVISION
 from rac_ai_scientist.hosts.evo_scientist import EvoScientistBridge
 from rac_ai_scientist.schemas import Budget, Usage
 
@@ -32,6 +34,43 @@ def _bridge(workspace: Path) -> EvoScientistBridge:
 
 
 class EvoNativeCompletionTests(unittest.TestCase):
+    def test_discoverybench_instructions_require_a_focused_submission(self):
+        bridge = object.__new__(EvoScientistBridge)
+        bridge.task_runtime = None
+        bridge.task_spec = TaskSpec(
+            "discoverybench",
+            "nls_ses/metadata_0/0/0",
+            "test",
+            "How is SES related to BA completion?",
+            DISCOVERYBENCH_REVISION,
+            "discovery_result.json",
+            profile="real-no-domain-knowledge",
+        )
+
+        instructions = bridge.benchmark_instructions()
+
+        self.assertIn("EvoScientist submission guidance for DiscoveryBench", instructions)
+        self.assertIn("exactly one primary hypothesis", instructions)
+        self.assertIn("estimated magnitude or uncertainty", instructions)
+        self.assertIn("Put those secondary details in `workflow`", instructions)
+
+    def test_evo_submission_guidance_does_not_apply_to_other_benchmarks(self):
+        bridge = object.__new__(EvoScientistBridge)
+        bridge.task_runtime = None
+        bridge.task_spec = TaskSpec(
+            "corebench",
+            "capsule",
+            "test",
+            "Compute the requested value.",
+            "revision",
+            "report.json",
+            questions=("What is the value?",),
+        )
+
+        instructions = bridge.benchmark_instructions()
+
+        self.assertNotIn("EvoScientist submission guidance for DiscoveryBench", instructions)
+
     def test_successful_first_pass_is_not_repeated(self):
         with tempfile.TemporaryDirectory() as raw:
             workspace = Path(raw)

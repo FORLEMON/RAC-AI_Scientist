@@ -44,6 +44,13 @@ NATIVE_DELIVERY_RUBRIC = """Acceptance criteria for this unattended research run
 - The report clearly distinguishes measured or derived results from plans and limitations; incomplete experiments are disclosed rather than presented as completed evidence.
 If any criterion is not met, continue the same research task using the existing workspace, address the grader feedback, and leave the required artifacts on disk before finishing."""
 
+DISCOVERYBENCH_SUBMISSION_GUIDANCE = """EvoScientist submission guidance for DiscoveryBench:
+- Keep the `hypothesis` field focused on the smallest number of atomic claims needed to answer the question directly. If the question asks about one relationship, state exactly one primary hypothesis.
+- State the relationship direction and its estimated magnitude or uncertainty when the completed analysis supports them.
+- Do not add separate sub-hypotheses for controls, mediators, interactions, robustness checks, literature comparisons, mechanisms, limitations, or exploratory findings unless the question explicitly asks for them.
+- Put those secondary details in `workflow`, `evidence`, or the supplementary report instead. Do not omit contradictory evidence or manufacture precision to make the hypothesis shorter.
+Before finishing, reread `hypothesis` and remove claims that are not necessary to answer the task."""
+
 _NATIVE_RUBRIC_BUILD_LOCK = threading.Lock()
 _NATIVE_MAX_INVOCATIONS = 2
 
@@ -102,6 +109,14 @@ class EvoScientistBridge(HostBridge):
     """Programmatic bridge over EvoScientist's check-pointed Deep Agent."""
 
     host_id = "evo_scientist"
+
+    def benchmark_instructions(self) -> str:
+        """Add output-shape guidance only for EvoScientist on DiscoveryBench."""
+        instructions = super().benchmark_instructions()
+        spec = getattr(self, "task_spec", None)
+        if spec is not None and spec.benchmark_id == "discoverybench":
+            instructions += "\n" + DISCOVERYBENCH_SUBMISSION_GUIDANCE + "\n"
+        return instructions
 
     def __init__(self, upstream: Path, manifest: Path, budget: Budget, model: str, api_key: str):
         self.upstream = upstream.resolve()
