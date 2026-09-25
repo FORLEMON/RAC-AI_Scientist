@@ -79,7 +79,8 @@ class DockerTaskRuntime:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         command = ["docker", "run", "--detach", "--name", self.name,
             "--init", "--memory", self.memory, "--cpus", str(self.cpus), "--pids-limit", "256",
-            "--security-opt", "no-new-privileges", "--cap-drop", "ALL", "--cap-add", "FOWNER", "--network", "bridge",
+            "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
+            "--cap-add", "FOWNER", "--cap-add", "DAC_OVERRIDE", "--network", "bridge",
             "--mount", f"type=bind,source={self.workspace},target={self.workspace}",
             "--workdir", str(self.workspace), "--env", "PYTHONDONTWRITEBYTECODE=1",
             "--entrypoint", "/usr/local/bin/python3", self.image,
