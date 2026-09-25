@@ -36,8 +36,9 @@ class DiscoveryJudge:
         options = dict(model=self.model, messages=messages)
         if self.model.rsplit("/", 1)[-1].startswith("gpt-5"):
             options["max_completion_tokens"] = max_tokens
-            if temperature != 1.0:
-                options["temperature"] = temperature
+            # Current GPT-5 Azure deployments accept only their default
+            # temperature. Upstream DiscoveryBench requests temperature=0,
+            # so forwarding it turns an otherwise valid score into HTTP 400.
         else:
             options.update(temperature=temperature, max_tokens=max_tokens)
         if json_response:

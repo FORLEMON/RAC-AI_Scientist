@@ -85,7 +85,7 @@ class BudgetTests(unittest.TestCase):
             captured.update(kwargs)
             return SimpleNamespace(usage=None, choices=[SimpleNamespace(finish_reason='stop', message=SimpleNamespace(content='{}'))])
         judge.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-        judge.chat(messages=[{'role': 'user', 'content': 'JSON'}], max_tokens=77)
+        judge.chat(messages=[{'role': 'user', 'content': 'JSON'}], max_tokens=77, temperature=0)
         self.assertEqual(captured['max_completion_tokens'], 77)
         self.assertNotIn('max_tokens', captured)
         self.assertNotIn('temperature', captured)
