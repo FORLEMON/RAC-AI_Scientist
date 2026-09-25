@@ -13,6 +13,42 @@ from rac_ai_scientist.resource_control import CpuGovernor, EpisodeResources
 
 
 class ParallelQueueTests(unittest.TestCase):
+    def test_parallel_controller_uses_batch_lock_with_explicit_cpu_isolation(self):
+        runner = QueueRunner.__new__(QueueRunner)
+        runner.root = Path('/repo')
+        runner.run_root = Path('/runs')
+        runner.batch = Path('/runs/evo-r1-r3')
+        runner.settings = {
+            'controller_lock_scope': 'batch',
+            'allow_parallel_controllers': True,
+        }
+        runner.rows = [{'cpuset_cpus': '8-13'}]
+
+        self.assertEqual(runner.controller_lock_path(), Path('/runs/queue-evo-r1-r3.lock'))
+
+    def test_parallel_controller_requires_opt_in_and_cpu_isolation(self):
+        runner = QueueRunner.__new__(QueueRunner)
+        runner.root = Path('/repo')
+        runner.run_root = Path('/runs')
+        runner.batch = Path('/runs/evo-r1-r3')
+        runner.settings = {'controller_lock_scope': 'batch'}
+        runner.rows = [{'cpuset_cpus': '8-13'}]
+        with self.assertRaisesRegex(ValueError, 'allow_parallel_controllers'):
+            runner.controller_lock_path()
+
+        runner.settings['allow_parallel_controllers'] = True
+        runner.rows = [{'cpuset_cpus': None}]
+        with self.assertRaisesRegex(ValueError, 'explicit CPU set'):
+            runner.controller_lock_path()
+
+    def test_global_controller_lock_remains_the_default(self):
+        runner = QueueRunner.__new__(QueueRunner)
+        runner.root = Path('/repo')
+        runner.run_root = Path('/runs')
+        runner.settings = {}
+
+        self.assertEqual(runner.controller_lock_path(), Path('/runs/queue-global.lock'))
+
     def test_four_named_lanes_run_in_parallel_and_keep_each_condition_order(self):
         runner = QueueRunner.__new__(QueueRunner)
         runner.settings = {'global_parallelism': 4}

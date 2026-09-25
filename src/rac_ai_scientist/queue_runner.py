@@ -472,11 +472,25 @@ class QueueRunner:
         finally:
             pool.shutdown(wait=True,cancel_futures=True)
 
+    def controller_lock_path(self):
+        """Select the controller lock; parallel controllers require explicit CPU isolation."""
+        run_root = getattr(self, 'run_root', self.root / 'runs')
+        scope = getattr(self, 'settings', {}).get('controller_lock_scope', 'global')
+        if scope == 'global':
+            return run_root / 'queue-global.lock'
+        if scope != 'batch':
+            raise ValueError("controller_lock_scope must be 'global' or 'batch'")
+        if self.settings.get('allow_parallel_controllers') is not True:
+            raise ValueError('batch-scoped controller locks require allow_parallel_controllers=true')
+        if not getattr(self, 'rows', None) or any(not row.get('cpuset_cpus') for row in self.rows):
+            raise ValueError('parallel controllers require an explicit CPU set for every episode')
+        return run_root / f'queue-{self.batch.name}.lock'
+
     def run(self):
         import fcntl
         run_root = getattr(self, 'run_root', self.root / 'runs')
         run_root.mkdir(parents=True, exist_ok=True)
-        with (run_root / 'queue-global.lock').open('w') as lock:
+        with self.controller_lock_path().open('w') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             self.initialize()
             self.state['status'] = 'running'

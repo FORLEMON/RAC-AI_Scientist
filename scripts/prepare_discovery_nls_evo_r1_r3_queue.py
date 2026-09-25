@@ -68,7 +68,7 @@ def main() -> int:
     episodes = []
     for row in rows:
         entry = queue_entry(root, row, config_path, sharednet_root)
-        entry["cpuset_cpus"] = "2-7"
+        entry["cpuset_cpus"] = "8-13"
         episodes.append(entry)
 
     queue_path = plan_root / "evo_scientist-nls_ses-r1-r3.json"
@@ -77,7 +77,7 @@ def main() -> int:
         "manifest_kind": "queue_plan_only",
         "queue_id": "evo_scientist-nls_ses-r1-r3",
         "host": "evo_scientist",
-        "resources": {"cpus": 6, "cpuset_cpus": "2-7"},
+        "resources": {"cpus": 6, "cpuset_cpus": "8-13"},
         "path_base": "repository_root",
         "environment_file": str(root / ".env"),
         "policy": {
@@ -93,6 +93,8 @@ def main() -> int:
     execution_path = plan_root / "execution.json"
     write_json(execution_path, {
         "global_parallelism": 1,
+        "controller_lock_scope": "batch",
+        "allow_parallel_controllers": True,
         "host_order": ["evo_scientist"],
         "queue_files": [str(queue_path)],
         "run_root": str(work_root / "runs"),
