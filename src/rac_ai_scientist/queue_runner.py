@@ -448,8 +448,9 @@ class QueueRunner:
 
     def run(self):
         import fcntl
-        self.run_root.mkdir(parents=True, exist_ok=True)
-        with (self.run_root / 'queue-global.lock').open('w') as lock:
+        run_root = getattr(self, 'run_root', self.root / 'runs')
+        run_root.mkdir(parents=True, exist_ok=True)
+        with (run_root / 'queue-global.lock').open('w') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             self.initialize()
             self.state['status'] = 'running'
