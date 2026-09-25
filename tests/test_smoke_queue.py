@@ -79,7 +79,7 @@ class BudgetTests(unittest.TestCase):
 
     def test_gpt5_judge_changes_transport_argument_only(self):
         judge = DiscoveryJudge.__new__(DiscoveryJudge)
-        judge.model, judge.usage = 'gpt-5.4', {'calls': 0, 'input_tokens': 0, 'output_tokens': 0}
+        judge.model, judge.max_completion_tokens, judge.usage = 'gpt-5.4', 4096, {'calls': 0, 'input_tokens': 0, 'output_tokens': 0}
         captured = {}
         def create(**kwargs):
             captured.update(kwargs)
@@ -89,10 +89,13 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(captured['max_completion_tokens'], 77)
         self.assertNotIn('max_tokens', captured)
         self.assertNotIn('temperature', captured)
+        captured.clear()
+        judge.chat(messages=[{'role': 'user', 'content': 'JSON'}], temperature=0)
+        self.assertEqual(captured['max_completion_tokens'], 4096)
 
     def test_judge_failure_reports_finish_reason_without_response_content(self):
         judge = DiscoveryJudge.__new__(DiscoveryJudge)
-        judge.model, judge.usage = 'gpt-5.5', {'calls': 0, 'input_tokens': 0, 'output_tokens': 0}
+        judge.model, judge.max_completion_tokens, judge.usage = 'gpt-5.5', 4096, {'calls': 0, 'input_tokens': 0, 'output_tokens': 0}
         response = SimpleNamespace(usage=None, choices=[SimpleNamespace(
             finish_reason='length', message=SimpleNamespace(content='', refusal=None))])
         judge.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: response)))

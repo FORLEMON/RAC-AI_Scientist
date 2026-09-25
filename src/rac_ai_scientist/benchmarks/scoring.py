@@ -29,10 +29,14 @@ class DiscoveryJudge:
             self.client = OpenAI(base_url=os.environ.get("JUDGE_API_BASE") or None, **options)
         else:
             raise ValueError("JUDGE_PROVIDER must be openai or azure")
+        self.max_completion_tokens = int(os.environ.get("JUDGE_MAX_COMPLETION_TOKENS", "4096"))
+        if self.max_completion_tokens <= 0:
+            raise ValueError("JUDGE_MAX_COMPLETION_TOKENS must be positive")
         self.usage = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
 
-    def chat(self, *, messages, model_name=None, max_tokens=4096, temperature=1.0, json_response=True):
+    def chat(self, *, messages, model_name=None, max_tokens=None, temperature=1.0, json_response=True):
         self.usage["calls"] += 1
+        max_tokens = self.max_completion_tokens if max_tokens is None else max_tokens
         options = dict(model=self.model, messages=messages)
         if self.model.rsplit("/", 1)[-1].startswith("gpt-5"):
             options["max_completion_tokens"] = max_tokens
