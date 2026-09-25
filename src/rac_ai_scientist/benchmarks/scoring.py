@@ -47,8 +47,15 @@ class DiscoveryJudge:
         if response.usage:
             self.usage["input_tokens"] += response.usage.prompt_tokens
             self.usage["output_tokens"] += response.usage.completion_tokens
-        if not response.choices or response.choices[0].finish_reason != "stop" or not response.choices[0].message.content:
-            raise ValueError("judge returned empty/truncated/refused output")
+        choice = response.choices[0] if response.choices else None
+        content = choice.message.content if choice else None
+        if not choice or choice.finish_reason != "stop" or not content:
+            refusal = getattr(choice.message, "refusal", None) if choice else None
+            raise ValueError(
+                "judge returned empty/truncated/refused output "
+                f"(finish_reason={getattr(choice, 'finish_reason', None)!r}, "
+                f"content_present={bool(content)}, refusal_present={bool(refusal)})"
+            )
         return response
 
     def get_response(self, client, prompt, model=None, max_retry=5, **kwargs):

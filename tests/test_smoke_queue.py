@@ -90,6 +90,15 @@ class BudgetTests(unittest.TestCase):
         self.assertNotIn('max_tokens', captured)
         self.assertNotIn('temperature', captured)
 
+    def test_judge_failure_reports_finish_reason_without_response_content(self):
+        judge = DiscoveryJudge.__new__(DiscoveryJudge)
+        judge.model, judge.usage = 'gpt-5.5', {'calls': 0, 'input_tokens': 0, 'output_tokens': 0}
+        response = SimpleNamespace(usage=None, choices=[SimpleNamespace(
+            finish_reason='length', message=SimpleNamespace(content='', refusal=None))])
+        judge.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: response)))
+        with self.assertRaisesRegex(ValueError, "finish_reason='length'.*content_present=False"):
+            judge.chat(messages=[{'role': 'user', 'content': 'JSON'}], temperature=0)
+
 
 class QueueFailureTests(unittest.TestCase):
     def test_existing_identical_read_only_task_spec_is_reused(self):
