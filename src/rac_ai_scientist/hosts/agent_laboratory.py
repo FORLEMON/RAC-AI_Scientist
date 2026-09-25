@@ -49,6 +49,13 @@ REQUIRED_TAGS = {
 # allowing many calls to consume the full lifecycle allowance over time.
 MAX_COMPLETION_TOKENS_PER_REQUEST = 65_536
 
+DISCOVERYBENCH_BENCHMARK_NAME = "discoverybench"
+DISCOVERYBENCH_LITERATURE_SKIP_NOTE = (
+    "External literature review is intentionally skipped for DiscoveryBench. "
+    "Derive the hypothesis from the supplied dataset and public task metadata; "
+    "do not rely on external papers as evidence."
+)
+
 
 def _request_completion_limit(remaining_output_tokens: int) -> int:
     """Return a context-safe per-request limit from the cumulative remainder."""
@@ -614,6 +621,7 @@ class AgentLaboratoryBridge(HostBridge):
                 lab_index=0,
                 agentRxiv=False,
             )
+            self._apply_benchmark_phase_overrides()
             guarded_paper_count = _install_researchclawbench_literature_guard(
                 self.workflow,
                 self.workspace,
@@ -846,6 +854,18 @@ class AgentLaboratoryBridge(HostBridge):
                 )
             )
         return cards
+
+    def _apply_benchmark_phase_overrides(self) -> None:
+        """Apply narrowly scoped workflow changes required by one benchmark."""
+        spec = getattr(self, "task_spec", None)
+        if getattr(spec, "benchmark_id", None) != DISCOVERYBENCH_BENCHMARK_NAME:
+            return
+
+        native_phase = NATIVE_NAMES["literature_review"]
+        self.workflow.phase_status[native_phase] = True
+        phd = getattr(self.workflow, "phd", None)
+        if phd is not None:
+            phd.lit_review = DISCOVERYBENCH_LITERATURE_SKIP_NOTE
 
     def _next_native(self) -> str:
         for capability_id in PHASES:
