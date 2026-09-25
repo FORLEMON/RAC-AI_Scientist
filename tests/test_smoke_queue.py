@@ -86,12 +86,12 @@ class BudgetTests(unittest.TestCase):
             return SimpleNamespace(usage=None, choices=[SimpleNamespace(finish_reason='stop', message=SimpleNamespace(content='{}'))])
         judge.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
         judge.chat(messages=[{'role': 'user', 'content': 'JSON'}], max_tokens=77, temperature=0)
-        self.assertEqual(captured['max_completion_tokens'], 4096)
+        self.assertEqual(captured['max_completion_tokens'], 8192)
         self.assertNotIn('max_tokens', captured)
         self.assertNotIn('temperature', captured)
         captured.clear()
         judge.chat(messages=[{'role': 'user', 'content': 'JSON'}], temperature=0)
-        self.assertEqual(captured['max_completion_tokens'], 4096)
+        self.assertEqual(captured['max_completion_tokens'], 8192)
 
     def test_judge_failure_reports_finish_reason_without_response_content(self):
         judge = DiscoveryJudge.__new__(DiscoveryJudge)
