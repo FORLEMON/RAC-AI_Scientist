@@ -100,6 +100,14 @@ class NativeHookTests(unittest.TestCase):
 
 
 class ControllerBoundaryTests(unittest.TestCase):
+    def test_rejects_invalid_cpuset_before_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace, logs = Path(directory) / 'workspace', Path(directory) / 'logs'
+            with patch('rac_ai_scientist.task_runtime.docker.os.name', 'posix'):
+                with self.assertRaisesRegex(ValueError, 'CPU set'):
+                    DockerTaskRuntime(workspace, 'sha256:' + 'a' * 64, logs,
+                                      wall_seconds=1, cpuset_cpus='2-7;rm')
+
     def test_file_api_rejects_escape_and_shares_workspace(self):
         with tempfile.TemporaryDirectory() as raw:
             runtime = object.__new__(DockerTaskRuntime)

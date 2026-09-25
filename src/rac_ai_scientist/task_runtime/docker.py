@@ -50,6 +50,7 @@ class DockerTaskRuntime:
     """
     def __init__(self, workspace: Path, image: str, log_dir: Path, *,
                  wall_seconds: float, memory: str = "8g", cpus: float = 4,
+                 cpuset_cpus: str | None = None,
                  bind: str = "127.0.0.1", port: int = 0, token: str | None = None,
                  advertised_url: str | None = None):
         if os.name != "posix":
@@ -62,7 +63,9 @@ class DockerTaskRuntime:
         self.log_dir = log_dir.resolve()
         if self.log_dir.is_relative_to(self.workspace):
             raise ValueError("runtime logs must be outside the agent workspace")
-        self.image, self.memory, self.cpus = image, memory, cpus
+        if cpuset_cpus is not None and not re.fullmatch(r"\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*", cpuset_cpus):
+            raise ValueError("invalid task runtime CPU set")
+        self.image, self.memory, self.cpus, self.cpuset_cpus = image, memory, cpus, cpuset_cpus
         self.name = "rac-task-" + uuid.uuid4().hex
         self.bind, self.port = bind, port
         self.token = token or secrets.token_urlsafe(32)
@@ -85,6 +88,8 @@ class DockerTaskRuntime:
             "--workdir", str(self.workspace), "--env", "PYTHONDONTWRITEBYTECODE=1",
             "--entrypoint", "/usr/local/bin/python3", self.image,
             "-c", "import time; time.sleep(10**9)"]
+        if self.cpuset_cpus:
+            command[command.index("--pids-limit"):command.index("--pids-limit")] = ["--cpuset-cpus", self.cpuset_cpus]
         try:
             subprocess.run(command, check=True, capture_output=True, text=True, timeout=180)
             inspected = subprocess.run(["docker", "inspect", self.name], check=True, capture_output=True, text=True, timeout=20)
@@ -126,6 +131,7 @@ class DockerTaskRuntime:
             threading.Thread(target=self.server.serve_forever, daemon=True).start()
             self.provenance = {"kind": "docker", "image": self.image, "image_id": image_id,
                                "workspace": str(self.workspace), "memory": self.memory, "cpus": self.cpus,
+                               "cpuset_cpus": self.cpuset_cpus,
                                "initial_python_packages": packages, "bootstrap_only": True,
                                "execution_protocol": "synchronous-bash-v1"}
             write_json(self.log_dir / "runtime.json", self.provenance)

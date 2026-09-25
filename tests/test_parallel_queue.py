@@ -13,6 +13,62 @@ from rac_ai_scientist.resource_control import CpuGovernor, EpisodeResources
 
 
 class ParallelQueueTests(unittest.TestCase):
+    def test_four_named_lanes_run_in_parallel_and_keep_each_condition_order(self):
+        runner = QueueRunner.__new__(QueueRunner)
+        runner.settings = {'global_parallelism': 4}
+        runner.host_order = ('evo_scientist', 'agent_laboratory')
+        runner.parallel_queue_lanes = True
+        runner.state_lock = threading.RLock()
+        runner.stop_event = threading.Event()
+        runner.state = {'episodes': {}}
+        runner.redact = Redactor()
+        runner.governor = None
+        runner.persist = lambda: None
+        runner.event = lambda *args, **kwargs: None
+        runner.rows = [
+            {'lane_id': lane, 'host': host, 'benchmark_id': 'discoverybench',
+             'condition': condition, 'episode_id': f'{lane}/{condition}'}
+            for lane, host in (
+                ('evo-ses', 'evo_scientist'), ('evo-worldbank', 'evo_scientist'),
+                ('lab-ses', 'agent_laboratory'), ('lab-worldbank', 'agent_laboratory'))
+            for condition in ('N0', 'R1', 'R2', 'R3')
+        ]
+        barrier = threading.Barrier(4)
+        starts = []
+        active = set()
+        peak = [0]
+
+        def execute(row, index):
+            with runner.state_lock:
+                starts.append(row.copy())
+                active.add(row['lane_id'])
+                peak[0] = max(peak[0], len(active))
+            if row['condition'] == 'N0':
+                barrier.wait(timeout=3)
+            time.sleep(.005)
+            with runner.state_lock:
+                active.remove(row['lane_id'])
+            if row['lane_id'] == 'evo-worldbank' and row['condition'] == 'R1':
+                raise RuntimeError('one cell failed')
+
+        runner.execute_episode = execute
+        runner.run_lanes()
+        self.assertEqual(peak[0], 4)
+        self.assertEqual(len(starts), 16)
+        for lane in ('evo-ses', 'evo-worldbank', 'lab-ses', 'lab-worldbank'):
+            self.assertEqual([row['condition'] for row in starts if row['lane_id'] == lane],
+                             ['N0', 'R1', 'R2', 'R3'])
+        self.assertEqual(runner.state['episodes']['evo-worldbank/R1']['status'], 'failed')
+
+    def test_host_command_uses_shared_six_cpu_affinity(self):
+        runner = QueueRunner.__new__(QueueRunner)
+        runner.settings = {'host_cpus': 6, 'host_cpuset_cpus': '2-7', 'host_memory': '4g'}
+        runner.source = Path('/source')
+        command = runner.base_command('test')
+        self.assertEqual(command[command.index('--cpus') + 1], '6')
+        self.assertEqual(command[command.index('--cpuset-cpus') + 1], '2-7')
+        self.assertIn('DAC_OVERRIDE', command)
+
     def test_two_lanes_preserve_condition_order_host_barrier_and_continue_after_error(self):
         runner=QueueRunner.__new__(QueueRunner)
         runner.settings={'global_parallelism':2}

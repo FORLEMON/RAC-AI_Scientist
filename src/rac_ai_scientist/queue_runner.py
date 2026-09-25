@@ -93,29 +93,54 @@ def run_logged(command, *, env, timeout, log_dir, stem, redact, cleanup=None, ca
 
 
 class QueueRunner:
-    def __init__(self, root: Path, batch: str):
+    def __init__(self, root: Path, batch: str, *, execution_config: str | Path | None = None):
         if Path(batch).name != batch or batch in {'.', '..'}:
             raise ValueError('batch must be one path component')
         self.root = root.resolve()
-        self.batch = self.root / 'runs' / batch
-        self.batch.mkdir(parents=True, exist_ok=True)
         self.env = dotenv(self.root / '.env')
         self.redact = Redactor(v for k, v in self.env.items() if k.endswith(('_KEY', '_TOKEN', '_INVITE')))
-        self.settings = load_config(self.root / 'configs/queues/execution.local.json')
+        execution_path = Path(execution_config) if execution_config else self.root / 'configs/queues/execution.local.json'
+        if not execution_path.is_absolute():
+            execution_path = self.root / execution_path
+        self.execution_path = execution_path.resolve()
+        self.settings = load_config(self.execution_path)
+        run_root = Path(self.settings.get('run_root', 'runs'))
+        self.run_root = (run_root if run_root.is_absolute() else self.root / run_root).resolve()
+        self.batch = self.run_root / batch
+        self.batch.mkdir(parents=True, exist_ok=True)
         self.state_lock = threading.RLock()
         self.stop_event = threading.Event()
         self.host_order = tuple(self.settings.get('host_order', HOSTS))
-        if set(self.host_order) != set(HOSTS) or len(self.host_order) != len(HOSTS):
-            raise ValueError('host_order must contain each supported host exactly once')
-        if self.settings['global_parallelism'] not in (1,2):
-            raise ValueError('only one or two parallel episodes are supported')
+        if not self.host_order or len(set(self.host_order)) != len(self.host_order) or not set(self.host_order).issubset(HOSTS):
+            raise ValueError('host_order must contain unique supported hosts')
+        if self.settings['global_parallelism'] not in (1, 2, 3, 4):
+            raise ValueError('global_parallelism must be between one and four')
         self.governor = None
         self.rows = []
         seen_rooms = set()
-        for host in self.host_order:
-            queue = load_config(self.root / f'configs/queues/{host}.smoke.json')
+        configured_queues = self.settings.get('queue_files')
+        queue_sources = []
+        if configured_queues:
+            for raw in configured_queues:
+                path = Path(raw)
+                queue_sources.append(path if path.is_absolute() else self.root / path)
+        else:
+            queue_sources = [self.root / f'configs/queues/{host}.smoke.json' for host in self.host_order]
+        self.parallel_queue_lanes = bool(configured_queues)
+        for queue_path in queue_sources:
+            queue = load_config(queue_path.resolve())
+            host = queue['host']
+            if host not in self.host_order:
+                raise ValueError(f'queue host {host!r} is not enabled by host_order')
+            policy = queue.get('policy', {})
+            if policy and (policy.get('max_parallel_episodes') != 1
+                    or policy.get('score_after_each_episode') is not True
+                    or policy.get('continue_on_episode_error') is not True
+                    or policy.get('continue_on_scoring_error') is not True
+                    or policy.get('retry_automatically') is not False):
+                raise ValueError(f'unsafe queue policy in {queue_path}')
             for item in queue['episodes']:
-                row = dict(item, host=host)
+                row = dict(item, host=host, lane_id=queue['queue_id'])
                 config_path = self.root / row['config']
                 config = load_config(config_path)
                 blockers = [f for f in validate_config(config, self.root) if f.level in {'ERROR', 'BLOCKED'}]
@@ -181,11 +206,28 @@ class QueueRunner:
             shutil.copytree(self.root / 'src', self.source, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
             shutil.copy2(self.root / 'upstream.lock.json', self.batch / 'upstream.lock.json')
             shutil.copy2(self.root / 'benchmark.lock.json', self.batch / 'benchmark.lock.json')
-        self.images = {host: self.inspect_image(self.settings['host_images'][host]) for host in HOSTS}
+        self.images = {host: self.inspect_image(self.settings['host_images'][host]) for host in self.host_order}
         self.scorer_image = self.inspect_image(self.settings['scorer_image'])
         self.runtime_image = self.inspect_image(self.settings['task_runtime_image'])
         network = json.loads(subprocess.check_output(['docker', 'network', 'inspect', 'bridge'], text=True, timeout=20))
         self.bridge_ip = network[0]['IPAM']['Config'][0]['Gateway']
+        self.agent_api_base = self.env['AGENT_API_BASE']
+        if relay := self.settings.get('agent_relay'):
+            inspected = json.loads(subprocess.check_output(['docker', 'inspect', relay['container']], text=True, timeout=20))[0]
+            health = (inspected.get('State', {}).get('Health') or {}).get('Status')
+            if health not in (None, 'healthy'):
+                raise RuntimeError(f"agent relay is not healthy: {health}")
+            relay_env = dict(item.split('=', 1) for item in inspected['Config'].get('Env', []) if '=' in item)
+            if relay_env.get('AZURE_AI_MODEL') != relay['expected_model']:
+                raise RuntimeError('agent relay deployment does not match the requested model')
+            networks = inspected.get('NetworkSettings', {}).get('Networks', {})
+            if relay.get('network'):
+                networks = {relay['network']: networks.get(relay['network'], {})}
+            addresses = [value.get('IPAddress') for value in networks.values() if value.get('IPAddress')]
+            if len(addresses) != 1:
+                raise RuntimeError('agent relay must resolve to exactly one selected container network address')
+            self.agent_api_base = f"http://{addresses[0]}:{int(relay.get('port', 8000))}/v1"
+            self.state['agent_relay'] = {'container': relay['container'], 'model': relay['expected_model']}
         self.state.update(host_images=self.images, scorer_image=self.scorer_image, runtime_image=self.runtime_image,
                           pricing=self.settings['pricing'], source_tree_sha256=self.source_hash())
         if extension := self.settings.get('openhands_extensions'):
@@ -211,12 +253,16 @@ class QueueRunner:
         subprocess.run(['docker', 'rm', '-f', name], capture_output=True, timeout=40)
 
     def base_command(self, name):
-        return ['docker', 'run', '--rm', '--name', name, '--init', '--cpus', str(self.settings['host_cpus']),
+        command = ['docker', 'run', '--rm', '--name', name, '--init', '--cpus', str(self.settings['host_cpus']),
                 '--memory', self.settings['host_memory'], '--pids-limit', '1024',
-                '--security-opt', 'no-new-privileges', '--cap-drop', 'ALL', '--cap-add', 'FOWNER',
+                '--security-opt', 'no-new-privileges', '--cap-drop', 'ALL',
+                '--cap-add', 'FOWNER', '--cap-add', 'DAC_OVERRIDE',
                 '--mount', f'type=bind,source={self.source},target=/opt/integration/src,readonly',
                 '--env', 'PYTHONPATH=/opt/integration/src', '--env', 'PYTHONUNBUFFERED=1',
                 '--env', 'PYTHONDONTWRITEBYTECODE=1']
+        if cpuset := self.settings.get('host_cpuset_cpus'):
+            command[command.index('--memory'):command.index('--memory')] = ['--cpuset-cpus', cpuset]
+        return command
 
     def execute_episode(self, row, index):
         episode = self.batch / 'episodes' / row['episode_id']
@@ -234,12 +280,12 @@ class QueueRunner:
         try:
             runtime = DockerTaskRuntime(episode / 'workspace', self.runtime_image, logs / 'task-runtime',
                 wall_seconds=row['budget']['max_wall_seconds'], memory=self.settings['task_memory'],
-                cpus=self.settings['task_cpus'], bind=self.bridge_ip)
+                cpus=self.settings['task_cpus'], cpuset_cpus=self.settings.get('task_cpuset_cpus'), bind=self.bridge_ip)
             client = runtime.start()
             self.redact.values.add(runtime.token)
             result['task_container'] = runtime.name
             self.save_episode(row['episode_id'],result)
-            gateway = ModelGateway(base_url=self.env['AGENT_API_BASE'], api_key=self.env['AGENT_API_KEY'],
+            gateway = ModelGateway(base_url=getattr(self, 'agent_api_base', self.env['AGENT_API_BASE']), api_key=self.env['AGENT_API_KEY'],
                 model=row['model'], budget=row['budget'], pricing=self.settings['pricing'], log_dir=logs / 'model',
                 bind=self.bridge_ip, redactor=self.redact)
             url = gateway.start()
@@ -374,6 +420,16 @@ class QueueRunner:
         settings=getattr(self,'settings',{})
         pool=ThreadPoolExecutor(max_workers=settings.get('global_parallelism',1))
         try:
+            if getattr(self, 'parallel_queue_lanes', False):
+                lanes = {}
+                for index, row in enumerate(self.rows, 1):
+                    lanes.setdefault(row['lane_id'], []).append((index, row))
+                self.event('parallel_queues_started', lanes=len(lanes))
+                futures = [pool.submit(lane, items) for items in lanes.values()]
+                for future in futures:
+                    future.result()
+                self.event('parallel_queues_finished', lanes=len(lanes))
+                return
             for host in getattr(self,'host_order',HOSTS):
                 lanes={}
                 for index,row in enumerate(self.rows,1):
@@ -392,7 +448,8 @@ class QueueRunner:
 
     def run(self):
         import fcntl
-        with (self.root / 'runs' / 'smoke-global.lock').open('w') as lock:
+        self.run_root.mkdir(parents=True, exist_ok=True)
+        with (self.run_root / 'queue-global.lock').open('w') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             self.initialize()
             self.state['status'] = 'running'
@@ -414,9 +471,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', default=str(Path.cwd()))
     parser.add_argument('--batch', default='smoke-20260923')
+    parser.add_argument('--execution-config')
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
-    runner = QueueRunner(Path(args.root), args.batch)
+    runner = QueueRunner(Path(args.root), args.batch, execution_config=args.execution_config)
     if args.check:
         print(json.dumps({'episodes':len(runner.rows),'valid':True,'parallelism':runner.settings['global_parallelism'],'host_order':runner.host_order}))
     else:
